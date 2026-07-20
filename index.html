@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>그릿마인드랩 문제은행 · 관리자</title>
+<style>
+@import url('https://cdnjs.cloudflare.com/ajax/libs/pretendard/1.3.9/static/pretendard.css');
+:root{
+  --ink:#1B2436; --bg:#EDF0F6; --card:#FFFFFF; --line:#DDE2EC; --muted:#6B7386;
+  --primary:#2C3A66; --primary-2:#1B2436; --ring:#2F6F6D;
+  --danger:#C1546B; --danger-bg:#FBEBEF; --ok:#1F9A8D; --ok-bg:#E7F6F3;
+  --warn:#D98E2A; --warn-bg:#FBF1E1;
+  --mono:'JetBrains Mono','SF Mono',ui-monospace,monospace;
+  --d1:#4C5FD5; --d1-bg:#EEF0FD; --d2:#1F9A8D; --d2-bg:#E7F6F3; --d3:#D98E2A; --d3-bg:#FBF1E1;
+  --d4:#C1546B; --d4-bg:#FBEBEF; --d5:#6B5CA5; --d5-bg:#F0EDF8; --d6:#3E8FB0; --d6-bg:#E8F3F7;
+  --d7:#B0703E; --d7-bg:#F7EEE5; --d8:#5C8A3E; --d8-bg:#EFF5E7; --d9:#8A3E6E; --d9-bg:#F7E8F1;
+  --d10:#3E5C8A; --d10-bg:#E8EDF5;
+}
+*{box-sizing:border-box;}
+html,body{margin:0;padding:0;}
+body{font-family:'Pretendard',-apple-system,'Malgun Gothic',sans-serif;background:var(--bg);color:var(--ink);min-height:100vh;padding:26px 16px 50px;display:flex;flex-direction:column;align-items:center;}
+.app{width:100%;max-width:1180px;}
+.topline{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;flex-wrap:wrap;gap:12px;}
+.brand h1{font-size:16px;margin:0;color:var(--primary-2);}
+.brand .sub{font-size:11.5px;color:var(--muted);font-family:var(--mono);}
+.topbtns{display:flex;gap:8px;align-items:center;}
+.btn{border:none;cursor:pointer;padding:10px 16px;border-radius:9px;font-weight:700;font-size:13px;font-family:inherit;}
+.btn.primary{background:var(--primary-2);color:#fff;}
+.btn.primary:hover{background:var(--ring);}
+.btn.ghost{background:#F1F3F8;color:var(--muted);}
+.btn.ghost:hover{background:#E6E9F2;}
+.btn.small{padding:6px 10px;font-size:12px;border-radius:7px;}
+.btn.danger{background:var(--danger-bg);color:var(--danger);}
+.userTag{font-size:11.5px;color:var(--muted);font-family:var(--mono);}
+
+.statrow{display:flex;gap:10px;flex-wrap:wrap;margin:16px 0 18px;}
+.statchip{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px 14px;font-size:12px;color:var(--muted);display:flex;gap:6px;align-items:center;}
+.statchip b{font-family:var(--mono);color:var(--ink);font-size:13px;}
+
+.viewToggle{display:flex;gap:6px;margin-bottom:14px;}
+.viewToggle button{border:1.5px solid var(--line);background:var(--card);border-radius:9px;padding:8px 14px;font-size:12.5px;font-weight:700;color:var(--muted);cursor:pointer;font-family:inherit;}
+.viewToggle button.active{background:var(--primary-2);color:#fff;border-color:transparent;}
+
+.toolbar{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;align-items:center;}
+.toolbar input[type=text]{flex:1;min-width:180px;padding:9px 12px;border:1.5px solid var(--line);border-radius:9px;font-size:13px;font-family:inherit;}
+.toolbar select{padding:9px 10px;border:1.5px solid var(--line);border-radius:9px;font-size:12.5px;font-family:inherit;color:var(--muted);}
+
+table.qtable{width:100%;border-collapse:collapse;background:var(--card);border-radius:14px;overflow:hidden;border:1px solid var(--line);}
+table.qtable th{text-align:left;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.3px;padding:11px 12px;border-bottom:1px solid var(--line);background:#F7F9FC;}
+table.qtable td{padding:11px 12px;font-size:13px;border-bottom:1px solid var(--line);vertical-align:middle;}
+table.qtable tr:last-child td{border-bottom:none;}
+table.qtable tr:hover td{background:#FAFBFD;}
+.idcell{font-family:var(--mono);font-size:11.5px;color:var(--muted);}
+.domchip{display:inline-block;font-size:11px;font-weight:700;padding:3px 9px;border-radius:999px;white-space:nowrap;}
+.stemcell{max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.imgbadge{font-size:11px;color:var(--muted);}
+.actioncell{display:flex;gap:6px;}
+.emptyrow{padding:40px;text-align:center;color:var(--muted);font-size:13px;}
+
+.grid{display:grid;grid-template-columns:230px 1fr;gap:18px;}
+@media (max-width:720px){.grid{grid-template-columns:1fr;}}
+.sidecard{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:20px 18px;height:fit-content;}
+.sidecard .domain-chip{display:inline-block;font-size:11.5px;font-weight:700;padding:4px 10px;border-radius:999px;margin-bottom:14px;}
+.field{margin-bottom:14px;}
+.field label{display:block;font-size:11px;color:var(--muted);font-weight:600;letter-spacing:.4px;text-transform:uppercase;margin-bottom:5px;}
+.field .val{font-family:var(--mono);font-size:13px;font-weight:600;word-break:break-all;}
+.field select,.field input{width:100%;font-family:var(--mono);font-size:14px;font-weight:600;border:1.5px solid var(--line);border-radius:8px;padding:7px 8px;background:#fbfcfe;}
+.versionTag{font-size:10.5px;color:var(--muted);font-family:var(--mono);margin-top:2px;}
+.maincard{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:28px 32px;min-height:380px;}
+.qnum{font-family:var(--mono);font-size:12px;color:var(--muted);margin-bottom:10px;}
+.stem{font-size:17px;font-weight:700;line-height:1.55;margin-bottom:14px;}
+.imgs{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;}
+.imgs img{max-width:260px;max-height:200px;border-radius:8px;border:1px solid var(--line);object-fit:contain;}
+.passage{background:#F7F8FB;border-left:3px solid var(--line);border-radius:8px;padding:16px 18px;font-size:13.5px;line-height:1.75;white-space:pre-wrap;color:#333B4D;margin-bottom:20px;max-height:240px;overflow-y:auto;}
+.choices{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:9px;}
+.choices li{display:flex;gap:10px;font-size:14.5px;line-height:1.55;padding:11px 14px;border:1.5px solid var(--line);border-radius:10px;}
+.cnum{font-family:var(--mono);font-weight:700;color:var(--ring);flex-shrink:0;}
+.navbar{display:flex;align-items:center;justify-content:center;gap:22px;margin-top:22px;}
+.navbtn{width:42px;height:42px;border-radius:50%;border:1.5px solid var(--line);background:var(--card);cursor:pointer;display:flex;align-items:center;justify-content:center;}
+.navbtn:hover:not(:disabled){background:var(--primary-2);color:#fff;}
+.navbtn:disabled{opacity:.3;}
+
+.overlay{position:fixed;inset:0;background:rgba(20,25,40,.45);display:none;align-items:flex-start;justify-content:center;padding:36px 16px;overflow-y:auto;z-index:50;}
+.overlay.open{display:flex;}
+.modal{background:var(--card);border-radius:18px;width:100%;max-width:680px;padding:26px 28px 28px;}
+.modal.wide{max-width:820px;}
+.modal h2{font-size:16px;margin:0 0 4px;}
+.modal .modalsub{font-size:12px;color:var(--muted);margin-bottom:18px;line-height:1.6;}
+.formrow{margin-bottom:12px;}
+.formrow label{display:block;font-size:11.5px;font-weight:700;color:var(--muted);margin-bottom:5px;}
+.formrow input,.formrow select,.formrow textarea{width:100%;font-family:'Pretendard',sans-serif;font-size:13.5px;border:1.5px solid var(--line);border-radius:8px;padding:9px 10px;background:#fbfcfe;}
+.formrow textarea{resize:vertical;min-height:56px;line-height:1.5;}
+.choiceRow{display:flex;gap:8px;align-items:center;margin-bottom:8px;}
+.choiceRow .cmark{font-family:var(--mono);font-weight:700;color:var(--ring);width:18px;flex-shrink:0;}
+.formgrid2{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+.modalbtns{display:flex;gap:10px;margin-top:16px;}
+.dupBox{border:1.5px solid var(--danger);background:var(--danger-bg);border-radius:10px;padding:14px 16px;margin-top:14px;font-size:12.5px;line-height:1.6;}
+.dupBox b{color:var(--danger);}
+.dupBtns{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;}
+.okBox{border:1.5px solid var(--ok);background:var(--ok-bg);border-radius:10px;padding:12px 16px;margin-top:14px;font-size:12.5px;color:#166B61;font-weight:600;}
+.shareNote{font-size:11px;color:var(--muted);margin-top:16px;line-height:1.6;border-top:1px dashed var(--line);padding-top:12px;}
+.thumbrow{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;}
+.thumbrow img{width:64px;height:64px;object-fit:cover;border-radius:6px;border:1px solid var(--line);}
+.batchArea{width:100%;min-height:220px;font-family:var(--mono);font-size:12.5px;line-height:1.6;border:1.5px solid var(--line);border-radius:10px;padding:12px;}
+.batchItem{border:1.5px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:10px;font-size:12.5px;}
+.batchItem.dup{border-color:var(--danger);background:var(--danger-bg);}
+.batchItem.ok{border-color:var(--ok);background:var(--ok-bg);}
+.batchItem .title{font-weight:700;margin-bottom:4px;}
+.batchItem .status{font-family:var(--mono);font-size:11px;}
+.batchBtns{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;}
+
+/* login */
+#loginOverlay{position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;z-index:100;}
+.loginCard{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:34px 32px;width:100%;max-width:340px;}
+.loginCard h2{margin:0 0 6px;font-size:17px;}
+.loginCard .sub{font-size:12px;color:var(--muted);margin-bottom:20px;}
+.loginCard input{width:100%;padding:10px 12px;margin-bottom:10px;border:1.5px solid var(--line);border-radius:8px;font-size:13.5px;font-family:inherit;}
+.loginCard .btn{width:100%;}
+#loginError{color:var(--danger);font-size:12px;margin-top:8px;min-height:16px;}
+</style>
+</head>
+<body>
+
+<div id="loginOverlay">
+  <div class="loginCard">
+    <h2>그릿마인드랩 문제은행</h2>
+    <div class="sub">팀원 계정으로 로그인해주세요.</div>
+    <input type="email" id="loginEmail" placeholder="이메일">
+    <input type="password" id="loginPw" placeholder="비밀번호">
+    <button class="btn primary" id="loginBtn">로그인</button>
+    <div id="loginError"></div>
+  </div>
+</div>
+
+<div class="app" id="appRoot" style="display:none;">
+  <div class="topline">
+    <div class="brand"><h1>그릿마인드랩 문제은행 · 관리자</h1><div class="sub">전체 <span id="totalCount">0</span>문항</div></div>
+    <div class="topbtns">
+      <span class="userTag" id="userEmailTag"></span>
+      <button class="btn ghost small" id="seedImportBtn">초기 데이터 가져오기</button>
+      <button class="btn ghost" id="openBatch">일괄 붙여넣기</button>
+      <button class="btn primary" id="openSingle">＋ 문제 추가</button>
+      <button class="btn ghost small" id="logoutBtn">로그아웃</button>
+    </div>
+  </div>
+
+  <div class="statrow" id="statrow"></div>
+
+  <div class="viewToggle">
+    <button class="active" id="viewListBtn">목록 관리</button>
+    <button id="viewDetailBtn">상세보기</button>
+  </div>
+
+  <div id="listView">
+    <div class="toolbar">
+      <input type="text" id="searchBox" placeholder="ID, 문제, 지문, 출처 검색...">
+      <select id="domainFilter"></select>
+      <select id="diffFilter"><option value="">난이도 전체</option><option>하</option><option>중</option><option>상</option><option>미정</option></select>
+    </div>
+    <table class="qtable">
+      <thead><tr><th>ID</th><th>영역</th><th>문제</th><th>난이도</th><th>정답</th><th>출처</th><th>이미지</th><th></th></tr></thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+
+  <div id="detailView" style="display:none;">
+    <div class="grid">
+      <div class="sidecard">
+        <span class="domain-chip" id="domainChip">영역</span>
+        <div class="field"><label>ID</label><div class="val" id="qid">-</div></div>
+        <div class="field"><label>출처</label><div class="val" id="qsource" style="font-size:12px;">-</div></div>
+        <div class="field"><label>난이도</label><select id="diffSelect"><option>미정</option><option>하</option><option>중</option><option>상</option></select></div>
+        <div class="field"><label>정답</label><input id="answerInput" placeholder="예: 3" maxlength="1"></div>
+        <div class="versionTag" id="versionTag"></div>
+      </div>
+      <div class="maincard">
+        <div class="qnum" id="qnumLabel">문항 1 / 1</div>
+        <div class="stem" id="stemText"></div>
+        <div class="imgs" id="imgsBox"></div>
+        <div class="passage" id="passageBox" style="display:none;"></div>
+        <ul class="choices" id="choicesList"></ul>
+      </div>
+    </div>
+    <div class="navbar">
+      <button class="navbtn" id="prevBtn">◀</button>
+      <span class="idcell" id="detailPos"></span>
+      <button class="navbtn" id="nextBtn">▶</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="overlaySingle">
+  <div class="modal">
+    <h2 id="singleTitle">새 문제 추가</h2>
+    <div class="modalsub">문제+지문 내용이 기존 문항과 70% 이상 유사하면 등록이 차단돼요.</div>
+    <div class="formgrid2">
+      <div class="formrow"><label>영역</label>
+        <select id="f_domain">
+          <option>의사소통능력</option><option>수리능력</option><option>문제해결능력</option>
+          <option>자기개발능력</option><option>자원관리능력</option><option>대인관계능력</option>
+          <option>정보능력</option><option>기술능력</option><option>조직이해능력</option><option>직업윤리</option>
+        </select>
+      </div>
+      <div class="formrow"><label>출처(자료/기관)</label><input id="f_source" placeholder="예: 한신대 모의고사"></div>
+    </div>
+    <div class="formrow"><label>문제(발문)</label><textarea id="f_stem"></textarea></div>
+    <div class="formrow"><label>지문/자료 (선택)</label><textarea id="f_passage" style="min-height:90px;"></textarea></div>
+    <div class="formrow"><label>이미지 (선택, 여러 장 가능)</label>
+      <input type="file" id="f_images" accept="image/*" multiple>
+      <div class="thumbrow" id="f_imgPreview"></div>
+    </div>
+    <div class="formrow"><label>보기</label>
+      <div class="choiceRow"><span class="cmark">①</span><input id="f_c1"></div>
+      <div class="choiceRow"><span class="cmark">②</span><input id="f_c2"></div>
+      <div class="choiceRow"><span class="cmark">③</span><input id="f_c3"></div>
+      <div class="choiceRow"><span class="cmark">④</span><input id="f_c4"></div>
+      <div class="choiceRow"><span class="cmark">⑤</span><input id="f_c5"></div>
+    </div>
+    <div class="formgrid2">
+      <div class="formrow"><label>정답</label><input id="f_answer" maxlength="1"></div>
+      <div class="formrow"><label>난이도</label><select id="f_difficulty"><option>미정</option><option>하</option><option>중</option><option>상</option></select></div>
+    </div>
+    <div id="checkResult"></div>
+    <div class="modalbtns">
+      <button class="btn ghost" id="cancelSingle">취소</button>
+      <button class="btn primary" id="checkAndUpload">중복 검사 후 등록</button>
+    </div>
+    <div class="shareNote">※ Firebase에 저장되어 팀 전체가 실시간으로 공유합니다.</div>
+  </div>
+</div>
+
+<div class="overlay" id="overlayBatch">
+  <div class="modal wide">
+    <h2>일괄 붙여넣기</h2>
+    <div class="modalsub" id="batchModeDesc">기존 모의고사 파일(한글/워드)에서 문제를 그대로 복사해서 붙여넣으면 자동으로 인식합니다.</div>
+
+    <div class="viewToggle" style="margin-bottom:12px;">
+      <button class="active" id="modeAutoBtn" type="button">시험지 형식 자동인식 (추천)</button>
+      <button id="modeTemplateBtn" type="button">템플릿 형식</button>
+    </div>
+
+    <div id="autoModeBar" class="formgrid2" style="margin-bottom:10px;">
+      <div class="formrow"><label>기본 영역 (영역 제목이 없을 때 적용)</label>
+        <select id="batch_domain">
+          <option>의사소통능력</option><option>수리능력</option><option>문제해결능력</option>
+          <option>자기개발능력</option><option>자원관리능력</option><option>대인관계능력</option>
+          <option>정보능력</option><option>기술능력</option><option>조직이해능력</option><option>직업윤리</option>
+        </select>
+      </div>
+      <div class="formrow"><label>출처</label><input id="batch_source" placeholder="예: 한신대 2025 모의고사"></div>
+    </div>
+
+    <button class="btn ghost small" id="copyTemplate" style="margin-bottom:10px;display:none;">템플릿 복사</button>
+    <textarea class="batchArea" id="batchInput" placeholder="여기에 시험지 내용을 그대로 붙여넣으세요."></textarea>
+    <div class="modalbtns">
+      <button class="btn ghost" id="cancelBatch">취소</button>
+      <button class="btn primary" id="parseBatch">분석하기</button>
+    </div>
+    <div id="batchResult" style="margin-top:16px;"></div>
+    <div class="modalbtns" id="batchConfirmRow" style="display:none;">
+      <button class="btn primary" id="registerAllOk">중복 없는 문항 전체 등록</button>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="./app.js"></script>
+</body>
+</html>
