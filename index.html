@@ -86,8 +86,10 @@ table.qtable tr:hover td{background:#FAFBFD;}
 
 .overlay{position:fixed;inset:0;background:rgba(20,25,40,.45);display:none;align-items:flex-start;justify-content:center;padding:36px 16px;overflow-y:auto;z-index:50;}
 .overlay.open{display:flex;}
-.modal{background:var(--card);border-radius:18px;width:100%;max-width:680px;padding:26px 28px 28px;}
+.modal{background:var(--card);border-radius:18px;width:100%;max-width:680px;padding:26px 28px 28px;max-height:88vh;overflow-y:auto;position:relative;}
 .modal.wide{max-width:820px;}
+.modalCloseX{position:absolute;top:18px;right:20px;width:32px;height:32px;border-radius:50%;border:none;background:#F1F3F8;color:var(--muted);font-size:18px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:5;}
+.modalCloseX:hover{background:var(--danger-bg);color:var(--danger);}
 .modal h2{font-size:16px;margin:0 0 4px;}
 .modal .modalsub{font-size:12px;color:var(--muted);margin-bottom:18px;line-height:1.6;}
 .formrow{margin-bottom:12px;}
@@ -105,7 +107,7 @@ table.qtable tr:hover td{background:#FAFBFD;}
 .shareNote{font-size:11px;color:var(--muted);margin-top:16px;line-height:1.6;border-top:1px dashed var(--line);padding-top:12px;}
 .thumbrow{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;}
 .thumbrow img{width:64px;height:64px;object-fit:cover;border-radius:6px;border:1px solid var(--line);}
-.batchArea{width:100%;min-height:220px;font-family:var(--mono);font-size:12.5px;line-height:1.6;border:1.5px solid var(--line);border-radius:10px;padding:12px;}
+.batchArea{width:100%;min-height:220px;max-height:320px;overflow-y:auto;font-family:var(--mono);font-size:12.5px;line-height:1.6;border:1.5px solid var(--line);border-radius:10px;padding:12px;}
 .batchItem{border:1.5px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:10px;font-size:12.5px;}
 .batchItem.dup{border-color:var(--danger);background:var(--danger-bg);}
 .batchItem.ok{border-color:var(--ok);background:var(--ok-bg);}
@@ -202,6 +204,7 @@ table.qtable tr:hover td{background:#FAFBFD;}
 
 <div class="overlay" id="overlaySingle">
   <div class="modal">
+    <button type="button" class="modalCloseX" id="closeXSingle" aria-label="닫기">×</button>
     <h2 id="singleTitle">새 문제 추가</h2>
     <div class="modalsub">문제+지문 내용이 기존 문항과 70% 이상 유사하면 등록이 차단돼요.</div>
     <div class="formgrid2">
@@ -255,6 +258,7 @@ table.qtable tr:hover td{background:#FAFBFD;}
 
 <div class="overlay" id="overlayBatch">
   <div class="modal wide">
+    <button type="button" class="modalCloseX" id="closeXBatch" aria-label="닫기">×</button>
     <h2>일괄 붙여넣기</h2>
     <div class="modalsub" id="batchModeDesc">기존 모의고사 파일(한글/워드)에서 문제를 그대로 복사해서 붙여넣으면 자동으로 인식합니다.</div>
 
@@ -296,6 +300,7 @@ table.qtable tr:hover td{background:#FAFBFD;}
 <!-- Bulk edit modal -->
 <div class="overlay" id="overlayBulk">
   <div class="modal">
+    <button type="button" class="modalCloseX" id="closeXBulk" aria-label="닫기">×</button>
     <h2>일괄 편집</h2>
     <div class="modalsub"><span id="bulkModalCount">0</span>개 문항에 적용됩니다. 바꾸지 않을 항목은 비워두거나 "변경 안 함"으로 두세요.</div>
 
