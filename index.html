@@ -159,7 +159,7 @@ table.qtable tr:hover td{background:#FAFBFD;}
       <select id="diffFilter"><option value="">난이도 전체</option><option>하</option><option>중</option><option>상</option><option>미정</option></select>
     </div>
     <table class="qtable">
-      <thead><tr><th>ID</th><th>영역</th><th>문제</th><th>난이도</th><th>정답</th><th>출처</th><th>이미지</th><th></th></tr></thead>
+      <thead><tr><th>ID</th><th>영역</th><th>문제</th><th>난이도</th><th>정답</th><th>출처</th><th>사용기관</th><th>이미지</th><th></th></tr></thead>
       <tbody id="tbody"></tbody>
     </table>
   </div>
@@ -170,6 +170,7 @@ table.qtable tr:hover td{background:#FAFBFD;}
         <span class="domain-chip" id="domainChip">영역</span>
         <div class="field"><label>ID</label><div class="val" id="qid">-</div></div>
         <div class="field"><label>출처</label><div class="val" id="qsource" style="font-size:12px;">-</div></div>
+        <div class="field"><label>사용 이력</label><div id="qUsageList" style="font-size:11.5px;color:var(--ink);line-height:1.6;">-</div></div>
         <div class="field"><label>난이도</label><select id="diffSelect"><option>미정</option><option>하</option><option>중</option><option>상</option></select></div>
         <div class="field"><label>정답</label><input id="answerInput" placeholder="예: 3" maxlength="1"></div>
         <div class="versionTag" id="versionTag"></div>
@@ -213,6 +214,15 @@ table.qtable tr:hover td{background:#FAFBFD;}
       </div>
       <div style="font-size:11px;color:var(--muted);margin-top:5px;">※ 드라이브 파일 공유 설정을 "링크가 있는 모든 사용자 - 뷰어"로 해두셔야 이미지가 보여요.</div>
       <div class="thumbrow" id="f_imgPreview" style="flex-direction:column;align-items:flex-start;"></div>
+    </div>
+    <div class="formrow"><label>사용 이력 (기관 · 사용 시기 · 학년, 여러 건 추가 가능)</label>
+      <div class="formgrid2" style="grid-template-columns:1.2fr 1fr 0.8fr;gap:8px;">
+        <input type="text" id="f_usageInst" placeholder="예: 한신대">
+        <input type="text" id="f_usageWhen" placeholder="예: 2025년 2학기">
+        <input type="text" id="f_usageGrade" placeholder="예: 3학년">
+      </div>
+      <button type="button" class="btn small ghost" id="f_addUsage" style="margin-top:6px;">사용 이력 추가</button>
+      <div id="f_usagePreview" style="margin-top:8px;display:flex;flex-direction:column;gap:6px;"></div>
     </div>
     <div class="formrow"><label>보기</label>
       <div class="choiceRow"><span class="cmark">①</span><input id="f_c1"></div>
