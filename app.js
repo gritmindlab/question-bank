@@ -630,8 +630,7 @@ async function extractDocxText(file){
   return result.value;
 }
 
-document.getElementById("examFileInput").addEventListener("change", async (e)=>{
-  const file = e.target.files[0];
+async function handleExamFile(file){
   if(!file) return;
   const statusEl = document.getElementById("fileExtractStatus");
   statusEl.textContent = "파일에서 텍스트를 추출하는 중...";
@@ -652,6 +651,30 @@ document.getElementById("examFileInput").addEventListener("change", async (e)=>{
     console.error(err);
     statusEl.textContent = "추출에 실패했어요: " + (err && err.message ? err.message : "알 수 없는 오류") + " (콘솔에서 자세한 내용을 확인할 수 있어요)";
   }
+}
+
+document.getElementById("examFileInput").addEventListener("change", (e)=>{
+  handleExamFile(e.target.files[0]);
+});
+
+const dropZone = document.getElementById("fileDropZone");
+["dragenter","dragover"].forEach(evt=>{
+  dropZone.addEventListener(evt, (e)=>{
+    e.preventDefault(); e.stopPropagation();
+    dropZone.classList.add("dragover");
+  });
+});
+["dragleave","dragend"].forEach(evt=>{
+  dropZone.addEventListener(evt, (e)=>{
+    e.preventDefault(); e.stopPropagation();
+    dropZone.classList.remove("dragover");
+  });
+});
+dropZone.addEventListener("drop", (e)=>{
+  e.preventDefault(); e.stopPropagation();
+  dropZone.classList.remove("dragover");
+  const file = e.dataTransfer.files && e.dataTransfer.files[0];
+  if(file) handleExamFile(file);
 });
 
 // ---------- batch modal ----------
