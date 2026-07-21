@@ -35,7 +35,10 @@ body{font-family:'Pretendard',-apple-system,'Malgun Gothic',sans-serif;backgroun
 .userTag{font-size:11.5px;color:var(--muted);font-family:var(--mono);}
 
 .statrow{display:flex;gap:10px;flex-wrap:wrap;margin:16px 0 18px;}
-.statchip{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px 14px;font-size:12px;color:var(--muted);display:flex;gap:6px;align-items:center;}
+.statchip{background:var(--card);border:1.5px solid var(--line);border-radius:10px;padding:8px 14px;font-size:12px;color:var(--muted);display:flex;gap:6px;align-items:center;cursor:pointer;font-family:inherit;transition:all .15s ease;}
+.statchip:hover{border-color:#C7CEDD;transform:translateY(-1px);}
+.statchip.active{background:var(--primary-2);border-color:transparent;color:#fff;}
+.statchip.active b{color:#fff;}
 .statchip b{font-family:var(--mono);color:var(--ink);font-size:13px;}
 
 .viewToggle{display:flex;gap:6px;margin-bottom:14px;}
@@ -271,8 +274,14 @@ table.qtable tr:hover td{background:#FAFBFD;}
       <div class="formrow"><label>출처</label><input id="batch_source" placeholder="예: 한신대 2025 모의고사"></div>
     </div>
 
+    <div class="formrow" style="border:1.5px dashed var(--line);border-radius:10px;padding:14px;background:#F9FAFC;">
+      <label style="margin-bottom:8px;">📎 파일에서 자동으로 가져오기 (PDF, DOCX)</label>
+      <input type="file" id="examFileInput" accept=".pdf,.docx">
+      <div id="fileExtractStatus" style="font-size:11.5px;color:var(--muted);margin-top:6px;">파일을 올리면 아래 텍스트 칸이 자동으로 채워져요. 한글(HWP) 파일은 한글 프로그램에서 "다른 이름으로 저장 → Word(.docx)"로 바꾼 뒤 올려주세요.</div>
+    </div>
+
     <button class="btn ghost small" id="copyTemplate" style="margin-bottom:10px;display:none;">템플릿 복사</button>
-    <textarea class="batchArea" id="batchInput" placeholder="여기에 시험지 내용을 그대로 붙여넣으세요."></textarea>
+    <textarea class="batchArea" id="batchInput" placeholder="여기에 시험지 내용을 그대로 붙여넣으세요. (또는 위에서 파일을 올리면 자동으로 채워집니다)"></textarea>
     <div class="modalbtns">
       <button class="btn ghost" id="cancelBatch">취소</button>
       <button class="btn primary" id="parseBatch">분석하기</button>
@@ -326,6 +335,8 @@ table.qtable tr:hover td{background:#FAFBFD;}
   </div>
 </div>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
 <script type="module" src="./app.js"></script>
 </body>
 </html>
