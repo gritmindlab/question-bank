@@ -384,6 +384,7 @@ document.getElementById("bulkEditBtn").addEventListener("click", ()=>{
   overlayBulk.classList.add("open");
 });
 document.getElementById("cancelBulk").addEventListener("click", ()=>overlayBulk.classList.remove("open"));
+document.getElementById("closeXBulk").addEventListener("click", ()=>overlayBulk.classList.remove("open"));
 overlayBulk.addEventListener("click", e=>{ if(e.target===overlayBulk) overlayBulk.classList.remove("open"); });
 
 document.getElementById("applyBulk").addEventListener("click", async ()=>{
@@ -465,6 +466,7 @@ function openEditFor(id){
   overlaySingle.classList.add("open");
 }
 document.getElementById("cancelSingle").addEventListener("click", ()=>overlaySingle.classList.remove("open"));
+document.getElementById("closeXSingle").addEventListener("click", ()=>overlaySingle.classList.remove("open"));
 overlaySingle.addEventListener("click", e=>{ if(e.target===overlaySingle) overlaySingle.classList.remove("open"); });
 
 function renderImgPreview(){
@@ -664,6 +666,7 @@ document.getElementById("openBatch").addEventListener("click", ()=>{
   overlayBatch.classList.add("open");
 });
 document.getElementById("cancelBatch").addEventListener("click", ()=>overlayBatch.classList.remove("open"));
+document.getElementById("closeXBatch").addEventListener("click", ()=>overlayBatch.classList.remove("open"));
 overlayBatch.addEventListener("click", e=>{ if(e.target===overlayBatch) overlayBatch.classList.remove("open"); });
 document.getElementById("copyTemplate").addEventListener("click", ()=>{
   navigator.clipboard.writeText(TEMPLATE).then(()=>{
