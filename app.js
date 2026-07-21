@@ -114,7 +114,8 @@ async function addNew(form){
   const docData = {
     id, domain: form.domain, stem: form.stem, passage: form.passage,
     choices: form.choices, source: form.source || "그릿마인드랩 자체 제작",
-    images: form.images||[], answer: form.answer, difficulty: form.difficulty,
+    images: form.images||[], usageLog: form.usageLog||[],
+    answer: form.answer, difficulty: form.difficulty,
     version: 1, history: [], deleted: false,
     createdAt: Date.now(), updatedAt: Date.now()
   };
@@ -133,6 +134,7 @@ async function applyReplace(id, form){
   await updateDoc(doc(db, QUESTIONS_COL, id), {
     stem: form.stem, passage: form.passage, choices: form.choices,
     source: form.source || prev.source, images: form.images||[],
+    usageLog: form.usageLog||[],
     answer: form.answer, difficulty: form.difficulty,
     version: (prev.version||1)+1, history, updatedAt: Date.now()
   });
@@ -191,13 +193,15 @@ function renderTable(){
   const list = getFiltered();
   const tbody = document.getElementById("tbody");
   if(list.length===0){
-    tbody.innerHTML = '<tr><td colspan="8"><div class="emptyrow">조건에 맞는 문제가 없습니다.</div></td></tr>';
+    tbody.innerHTML = '<tr><td colspan="9"><div class="emptyrow">조건에 맞는 문제가 없습니다.</div></td></tr>';
     return;
   }
   tbody.innerHTML = list.map(q=>{
     const col = DOMAIN_COLORS[q.domain] || {c:'#888',bg:'#eee'};
     const stemShort = (q.stem||"").slice(0,45) + ((q.stem||"").length>45?"…":"");
     const imgCount = (q.images||[]).length;
+    const usage = q.usageLog||[];
+    const usageShort = usage.length ? usage.map(u=>u.institution).filter(Boolean).join(', ') : '-';
     return '<tr>'+
       '<td class="idcell">'+q.id+'</td>'+
       '<td><span class="domchip" style="color:'+col.c+';background:'+col.bg+'">'+q.domain+'</span></td>'+
@@ -205,6 +209,7 @@ function renderTable(){
       '<td>'+ (q.difficulty||"미정") +'</td>'+
       '<td class="idcell">'+ (q.answer||"-") +'</td>'+
       '<td style="font-size:11.5px;color:var(--muted);">'+ (q.source||"-") +'</td>'+
+      '<td style="font-size:11.5px;color:var(--muted);max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="'+usageShort.replace(/"/g,'&quot;')+'">'+usageShort+'</td>'+
       '<td class="imgbadge">'+ (imgCount>0 ? ('🖼 '+imgCount) : '-') +'</td>'+
       '<td class="actioncell">'+
         '<button class="btn small ghost" data-act="view" data-id="'+q.id+'">보기</button>'+
@@ -268,6 +273,11 @@ function renderDetail(){
   chip.textContent=q.domain; chip.style.color=col.c; chip.style.background=col.bg;
   document.getElementById("qid").textContent=q.id;
   document.getElementById("qsource").textContent=q.source||"-";
+  const usageBox = document.getElementById("qUsageList");
+  const usage = q.usageLog||[];
+  usageBox.innerHTML = usage.length
+    ? usage.map(u=>'<div>'+ [u.institution, u.when, u.grade].filter(Boolean).join(' · ') +'</div>').join('')
+    : '-';
   document.getElementById("stemText").textContent=q.stem;
   document.getElementById("imgsBox").innerHTML = (q.images||[]).map(src=>'<img src="'+toViewableImageUrl(src)+'" loading="lazy">').join('');
   const passageBox = document.getElementById("passageBox");
@@ -305,8 +315,11 @@ function resetSingleForm(){
   document.getElementById("f_difficulty").value="미정";
   document.getElementById("f_imageLinkInput").value="";
   document.getElementById("f_imgPreview").innerHTML="";
+  ["f_usageInst","f_usageWhen","f_usageGrade"].forEach(id=>document.getElementById(id).value="");
+  document.getElementById("f_usagePreview").innerHTML="";
   document.getElementById("checkResult").innerHTML="";
   pendingImages = [];
+  pendingUsage = [];
 }
 document.getElementById("openSingle").addEventListener("click", ()=>{
   editingId=null;
@@ -328,6 +341,9 @@ function openEditFor(id){
   document.getElementById("f_imageLinkInput").value="";
   pendingImages = (q.images||[]).slice();
   renderImgPreview();
+  ["f_usageInst","f_usageWhen","f_usageGrade"].forEach(id=>document.getElementById(id).value="");
+  pendingUsage = (q.usageLog||[]).slice();
+  renderUsagePreview();
   document.getElementById("checkResult").innerHTML="";
   overlaySingle.classList.add("open");
 }
@@ -358,6 +374,33 @@ document.getElementById("f_addImageLink").addEventListener("click", ()=>{
   renderImgPreview();
 });
 
+let pendingUsage = [];
+function renderUsagePreview(){
+  document.getElementById("f_usagePreview").innerHTML = pendingUsage.map((u,i)=>
+    '<div style="display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:6px;padding:6px 10px;font-size:12px;">'+
+    '<span style="font-weight:700;">'+ (u.institution||"-") +'</span>'+
+    '<span style="color:var(--muted);">'+ (u.when||"-") +'</span>'+
+    '<span style="color:var(--muted);">'+ (u.grade||"-") +'</span>'+
+    '<button type="button" data-rmU="'+i+'" style="margin-left:auto;border:none;background:none;cursor:pointer;color:var(--danger);font-weight:700;">×</button>'+
+    '</div>'
+  ).join('');
+  document.getElementById("f_usagePreview").querySelectorAll("button[data-rmU]").forEach(btn=>{
+    btn.addEventListener("click", ()=>{
+      pendingUsage.splice(parseInt(btn.getAttribute("data-rmU"),10), 1);
+      renderUsagePreview();
+    });
+  });
+}
+document.getElementById("f_addUsage").addEventListener("click", ()=>{
+  const inst = document.getElementById("f_usageInst").value.trim();
+  const when = document.getElementById("f_usageWhen").value.trim();
+  const grade = document.getElementById("f_usageGrade").value.trim();
+  if(!inst && !when && !grade) return;
+  pendingUsage.push({institution:inst, when, grade});
+  ["f_usageInst","f_usageWhen","f_usageGrade"].forEach(id=>document.getElementById(id).value="");
+  renderUsagePreview();
+});
+
 function readForm(){
   return {
     domain: document.getElementById("f_domain").value,
@@ -367,7 +410,8 @@ function readForm(){
     choices: [1,2,3,4,5].map(n=>document.getElementById("f_c"+n).value.trim()).filter(v=>v),
     answer: document.getElementById("f_answer").value.trim(),
     difficulty: document.getElementById("f_difficulty").value,
-    images: pendingImages.slice()
+    images: pendingImages.slice(),
+    usageLog: pendingUsage.slice()
   };
 }
 
