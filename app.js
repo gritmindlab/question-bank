@@ -7,14 +7,10 @@ import {
   getFirestore, collection, doc, getDoc, getDocs, setDoc, updateDoc,
   onSnapshot, query, orderBy
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import {
-  getStorage, ref, uploadString, getDownloadURL
-} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js";
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-const storage = getStorage(app);
 
 const QUESTIONS_COL = "questions";
 const SIM_THRESHOLD = 0.70;
@@ -100,27 +96,25 @@ function nextIdFor(domain){
   return code+"-"+String(maxN+1).padStart(4,"0");
 }
 
-async function uploadImages(id, dataUrls){
-  const urls = [];
-  for(let i=0;i<dataUrls.length;i++){
-    const src = dataUrls[i];
-    if(src.startsWith("http")){ urls.push(src); continue; } // already uploaded url, keep
-    const path = `question-images/${id}/${Date.now()}_${i}.jpg`;
-    const sref = ref(storage, path);
-    await uploadString(sref, src, "data_url");
-    const url = await getDownloadURL(sref);
-    urls.push(url);
-  }
-  return urls;
+// 구글 드라이브 공유 링크 -> <img>에서 바로 보이는 형태로 변환
+// (드라이브 파일이 "링크가 있는 모든 사용자 - 뷰어"로 공유되어 있어야 정상적으로 보임)
+function extractDriveId(url){
+  const patterns = [/\/file\/d\/([a-zA-Z0-9_-]+)/, /[?&]id=([a-zA-Z0-9_-]+)/, /\/d\/([a-zA-Z0-9_-]+)/];
+  for(const p of patterns){ const m = url.match(p); if(m) return m[1]; }
+  return null;
+}
+function toViewableImageUrl(url){
+  const id = extractDriveId(url);
+  if(id) return `https://drive.google.com/uc?export=view&id=${id}`;
+  return url;
 }
 
 async function addNew(form){
   const id = nextIdFor(form.domain);
-  const images = await uploadImages(id, form.images||[]);
   const docData = {
     id, domain: form.domain, stem: form.stem, passage: form.passage,
     choices: form.choices, source: form.source || "그릿마인드랩 자체 제작",
-    images, answer: form.answer, difficulty: form.difficulty,
+    images: form.images||[], answer: form.answer, difficulty: form.difficulty,
     version: 1, history: [], deleted: false,
     createdAt: Date.now(), updatedAt: Date.now()
   };
@@ -131,7 +125,6 @@ async function addNew(form){
 async function applyReplace(id, form){
   const prevSnap = await getDoc(doc(db, QUESTIONS_COL, id));
   const prev = prevSnap.data();
-  const images = await uploadImages(id, form.images||[]);
   const history = prev.history || [];
   history.push({
     stem:prev.stem, passage:prev.passage, choices:prev.choices, answer:prev.answer,
@@ -139,7 +132,7 @@ async function applyReplace(id, form){
   });
   await updateDoc(doc(db, QUESTIONS_COL, id), {
     stem: form.stem, passage: form.passage, choices: form.choices,
-    source: form.source || prev.source, images,
+    source: form.source || prev.source, images: form.images||[],
     answer: form.answer, difficulty: form.difficulty,
     version: (prev.version||1)+1, history, updatedAt: Date.now()
   });
@@ -276,7 +269,7 @@ function renderDetail(){
   document.getElementById("qid").textContent=q.id;
   document.getElementById("qsource").textContent=q.source||"-";
   document.getElementById("stemText").textContent=q.stem;
-  document.getElementById("imgsBox").innerHTML = (q.images||[]).map(src=>'<img src="'+src+'">').join('');
+  document.getElementById("imgsBox").innerHTML = (q.images||[]).map(src=>'<img src="'+toViewableImageUrl(src)+'" loading="lazy">').join('');
   const passageBox = document.getElementById("passageBox");
   if(q.passage && q.passage.trim()){ passageBox.style.display="block"; passageBox.textContent=q.passage; }
   else passageBox.style.display="none";
@@ -310,7 +303,7 @@ function resetSingleForm(){
   [1,2,3,4,5].forEach(n=>document.getElementById("f_c"+n).value="");
   document.getElementById("f_domain").value="의사소통능력";
   document.getElementById("f_difficulty").value="미정";
-  document.getElementById("f_images").value="";
+  document.getElementById("f_imageLinkInput").value="";
   document.getElementById("f_imgPreview").innerHTML="";
   document.getElementById("checkResult").innerHTML="";
   pendingImages = [];
@@ -332,24 +325,37 @@ function openEditFor(id){
   [1,2,3,4,5].forEach(n=>document.getElementById("f_c"+n).value=(q.choices||[])[n-1]||"");
   document.getElementById("f_answer").value = q.answer||"";
   document.getElementById("f_difficulty").value = q.difficulty||"미정";
+  document.getElementById("f_imageLinkInput").value="";
   pendingImages = (q.images||[]).slice();
-  document.getElementById("f_imgPreview").innerHTML = pendingImages.map(s=>'<img src="'+s+'">').join('');
+  renderImgPreview();
   document.getElementById("checkResult").innerHTML="";
   overlaySingle.classList.add("open");
 }
 document.getElementById("cancelSingle").addEventListener("click", ()=>overlaySingle.classList.remove("open"));
 overlaySingle.addEventListener("click", e=>{ if(e.target===overlaySingle) overlaySingle.classList.remove("open"); });
 
-document.getElementById("f_images").addEventListener("change", (e)=>{
-  const files = Array.from(e.target.files);
-  files.forEach(file=>{
-    const reader = new FileReader();
-    reader.onload = ()=>{
-      pendingImages.push(reader.result); // temp data URL, uploaded to Storage on save
-      document.getElementById("f_imgPreview").innerHTML = pendingImages.map(s=>'<img src="'+s+'">').join('');
-    };
-    reader.readAsDataURL(file);
+function renderImgPreview(){
+  document.getElementById("f_imgPreview").innerHTML = pendingImages.map((link,i)=>
+    '<div style="display:flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:6px;padding:4px 8px;font-size:11px;max-width:100%;">'+
+    '<img src="'+toViewableImageUrl(link)+'" style="width:36px;height:36px;object-fit:cover;border-radius:4px;" onerror="this.style.display=\'none\'">'+
+    '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:220px;">'+link+'</span>'+
+    '<button type="button" data-rm="'+i+'" style="border:none;background:none;cursor:pointer;color:var(--danger);font-weight:700;">×</button>'+
+    '</div>'
+  ).join('');
+  document.getElementById("f_imgPreview").querySelectorAll("button[data-rm]").forEach(btn=>{
+    btn.addEventListener("click", ()=>{
+      pendingImages.splice(parseInt(btn.getAttribute("data-rm"),10), 1);
+      renderImgPreview();
+    });
   });
+}
+document.getElementById("f_addImageLink").addEventListener("click", ()=>{
+  const input = document.getElementById("f_imageLinkInput");
+  const link = input.value.trim();
+  if(!link) return;
+  pendingImages.push(link);
+  input.value = "";
+  renderImgPreview();
 });
 
 function readForm(){
