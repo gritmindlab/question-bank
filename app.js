@@ -576,7 +576,7 @@ document.getElementById("checkAndUpload").addEventListener("click", async ()=>{
 
 // ---------- file upload: auto-extract text from PDF/DOCX ----------
 if(window.pdfjsLib){
-  window.pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.js";
+  window.pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 }
 
 async function extractPdfText(file){
@@ -606,15 +606,19 @@ document.getElementById("examFileInput").addEventListener("change", async (e)=>{
   try{
     let text = "";
     const name = file.name.toLowerCase();
-    if(name.endsWith(".pdf")) text = await extractPdfText(file);
-    else if(name.endsWith(".docx")) text = await extractDocxText(file);
-    else { statusEl.textContent = "PDF 또는 DOCX 파일만 지원돼요."; return; }
+    if(name.endsWith(".pdf")){
+      if(!window.pdfjsLib){ statusEl.textContent = "PDF 처리 라이브러리를 불러오지 못했어요. 새로고침 후 다시 시도해주세요."; return; }
+      text = await extractPdfText(file);
+    } else if(name.endsWith(".docx")){
+      if(!window.mammoth){ statusEl.textContent = "DOCX 처리 라이브러리를 불러오지 못했어요. 새로고침 후 다시 시도해주세요."; return; }
+      text = await extractDocxText(file);
+    } else { statusEl.textContent = "PDF 또는 DOCX 파일만 지원돼요."; return; }
 
     document.getElementById("batchInput").value = text;
     statusEl.textContent = "✓ 텍스트를 추출했어요. 아래 내용을 확인하고 '분석하기'를 눌러주세요 (표/이미지 있는 문제는 별도로 확인이 필요할 수 있어요).";
   }catch(err){
     console.error(err);
-    statusEl.textContent = "추출에 실패했어요. 파일이 손상되었거나 지원하지 않는 형식일 수 있어요.";
+    statusEl.textContent = "추출에 실패했어요: " + (err && err.message ? err.message : "알 수 없는 오류") + " (콘솔에서 자세한 내용을 확인할 수 있어요)";
   }
 });
 
