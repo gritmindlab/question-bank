@@ -586,7 +586,37 @@ async function extractPdfText(file){
   for(let i=1;i<=pdf.numPages;i++){
     const page = await pdf.getPage(i);
     const content = await page.getTextContent();
-    const pageText = content.items.map(it=>it.str).join(" ");
+
+    // pdf.js gives a flat list of text fragments with position info but no line breaks.
+    // Reconstruct lines by grouping fragments that share roughly the same Y position,
+    // then order lines top-to-bottom and fragments within a line left-to-right.
+    const items = content.items
+      .filter(it => it.str !== undefined)
+      .map(it => ({ str: it.str, x: it.transform[4], y: it.transform[5] }));
+
+    items.sort((a,b) => (b.y - a.y) || (a.x - b.x)); // top-to-bottom, then left-to-right
+
+    const lines = [];
+    let curLine = [];
+    let curY = null;
+    const Y_TOLERANCE = 3;
+    items.forEach(it=>{
+      if(curY === null || Math.abs(it.y - curY) <= Y_TOLERANCE){
+        curLine.push(it);
+        curY = curY===null ? it.y : curY;
+      } else {
+        lines.push(curLine);
+        curLine = [it];
+        curY = it.y;
+      }
+    });
+    if(curLine.length) lines.push(curLine);
+
+    const pageText = lines.map(line=>{
+      line.sort((a,b)=>a.x-b.x);
+      return line.map(it=>it.str).join("");
+    }).join("\n");
+
     text += pageText + "\n";
   }
   return text;
