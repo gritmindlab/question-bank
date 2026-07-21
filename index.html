@@ -206,9 +206,13 @@ table.qtable tr:hover td{background:#FAFBFD;}
     </div>
     <div class="formrow"><label>문제(발문)</label><textarea id="f_stem"></textarea></div>
     <div class="formrow"><label>지문/자료 (선택)</label><textarea id="f_passage" style="min-height:90px;"></textarea></div>
-    <div class="formrow"><label>이미지 (선택, 여러 장 가능)</label>
-      <input type="file" id="f_images" accept="image/*" multiple>
-      <div class="thumbrow" id="f_imgPreview"></div>
+    <div class="formrow"><label>이미지 (구글 드라이브 링크, 여러 개 추가 가능)</label>
+      <div style="display:flex;gap:8px;">
+        <input type="text" id="f_imageLinkInput" placeholder="https://drive.google.com/file/d/...">
+        <button type="button" class="btn small ghost" id="f_addImageLink" style="flex-shrink:0;">추가</button>
+      </div>
+      <div style="font-size:11px;color:var(--muted);margin-top:5px;">※ 드라이브 파일 공유 설정을 "링크가 있는 모든 사용자 - 뷰어"로 해두셔야 이미지가 보여요.</div>
+      <div class="thumbrow" id="f_imgPreview" style="flex-direction:column;align-items:flex-start;"></div>
     </div>
     <div class="formrow"><label>보기</label>
       <div class="choiceRow"><span class="cmark">①</span><input id="f_c1"></div>
