@@ -49,6 +49,17 @@ function diceSim(a,b){
 }
 function combinedText(q){ return (q.stem||"")+" "+(q.passage||""); }
 
+function imageIdsOf(imgArr){
+  return (imgArr||[]).map(u=>extractDriveId(u) || u).filter(Boolean);
+}
+// NOTE: image-based similarity was tried but removed — many legitimately different
+// questions intentionally share the same reference image/drive file (shared data table,
+// shared diagram across a question pair, etc.), so "same image" is not a reliable signal
+// of duplicate content here. Similarity is judged by text only.
+function combinedSimilarity(newText, newImages, q){
+  return diceSim(newText, combinedText(q));
+}
+
 // ---------- auth ----------
 const loginOverlay = document.getElementById("loginOverlay");
 const appRoot = document.getElementById("appRoot");
@@ -117,6 +128,7 @@ async function addNew(form){
     choices: form.choices, source: form.source || "그릿마인드랩 자체 제작",
     images: form.images||[], usageLog: form.usageLog||[],
     answer: form.answer, difficulty: form.difficulty,
+    needsImage: !!form.needsImage,
     version: 1, history: [], deleted: false,
     createdAt: Date.now(), updatedAt: Date.now()
   };
@@ -202,9 +214,11 @@ function getFiltered(){
   const q = document.getElementById("searchBox").value.trim().toLowerCase();
   const dom = document.getElementById("domainFilter").value;
   const diff = document.getElementById("diffFilter").value;
+  const imgNeed = document.getElementById("imgNeedFilter").value;
   let list = allQuestions.slice();
   if(dom) list = list.filter(x=>x.domain===dom);
   if(diff) list = list.filter(x=>(x.difficulty||"미정")===diff);
+  if(imgNeed==="needed") list = list.filter(x=>x.needsImage && (x.images||[]).length===0);
   if(q) list = list.filter(x => (x.id+" "+x.stem+" "+(x.passage||"")+" "+(x.source||"")).toLowerCase().includes(q));
   return list;
 }
@@ -238,7 +252,7 @@ function renderTable(){
       '<td class="idcell">'+ (q.answer||"-") +'</td>'+
       '<td style="font-size:11.5px;color:var(--muted);">'+ (q.source||"-") +'</td>'+
       '<td style="font-size:11.5px;color:var(--muted);max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="'+usageShort.replace(/"/g,'&quot;')+'">'+usageShort+'</td>'+
-      '<td class="imgbadge">'+ (imgCount>0 ? ('🖼 '+imgCount) : '-') +'</td>'+
+      '<td class="imgbadge">'+ (imgCount>0 ? ('🖼 '+imgCount) : (q.needsImage ? '<span style="color:var(--warn);font-weight:700;">⚠ 필요</span>' : '-')) +'</td>'+
       '<td class="actioncell">'+
         '<button class="btn small ghost" data-act="view" data-id="'+q.id+'">보기</button>'+
         '<button class="btn small ghost" data-act="edit" data-id="'+q.id+'">편집</button>'+
@@ -300,7 +314,7 @@ document.getElementById("bulkDeleteBtn").addEventListener("click", async ()=>{
   renderTable();
 });
 
-["searchBox","domainFilter","diffFilter"].forEach(id=>{
+["searchBox","domainFilter","diffFilter","imgNeedFilter"].forEach(id=>{
   document.getElementById(id).addEventListener("input", renderTable);
   document.getElementById(id).addEventListener("change", renderTable);
 });
@@ -348,7 +362,13 @@ function renderDetail(){
     ? usage.map(u=>'<div>'+ [u.institution, u.when, u.grade].filter(Boolean).join(' · ') +'</div>').join('')
     : '-';
   document.getElementById("stemText").textContent=q.stem;
-  document.getElementById("imgsBox").innerHTML = (q.images||[]).map(src=>'<img src="'+toViewableImageUrl(src)+'" loading="lazy">').join('');
+  const imgsBox = document.getElementById("imgsBox");
+  const imgList = (q.images||[]);
+  let imgsHtml = imgList.map(src=>'<img src="'+toViewableImageUrl(src)+'" loading="lazy">').join('');
+  if(q.needsImage && imgList.length===0){
+    imgsHtml = '<div style="background:var(--warn-bg);color:var(--warn);font-weight:700;font-size:12.5px;padding:8px 12px;border-radius:8px;">⚠ 이 문항은 원본에 그림/표가 있었을 가능성이 있어요 — "편집"에서 이미지 링크를 추가해주세요.</div>' + imgsHtml;
+  }
+  imgsBox.innerHTML = imgsHtml;
   const passageBox = document.getElementById("passageBox");
   if(q.passage && q.passage.trim()){ passageBox.style.display="block"; passageBox.textContent=q.passage; }
   else passageBox.style.display="none";
@@ -548,7 +568,7 @@ document.getElementById("checkAndUpload").addEventListener("click", async ()=>{
 
   let best={sim:0,q:null};
   const newText = form.stem+" "+form.passage;
-  allQuestions.forEach(q=>{ const sim=diceSim(newText, combinedText(q)); if(sim>best.sim) best={sim,q}; });
+  allQuestions.forEach(q=>{ const sim=combinedSimilarity(newText, form.images, q); if(sim>best.sim) best={sim,q}; });
 
   if(best.sim >= SIM_THRESHOLD){
     resBox.innerHTML =
@@ -765,6 +785,23 @@ const CIRCLED_SPLIT_RE = /([①②③④⑤])/;
 // Handles both "one choice per line" and "all five choices packed onto one line"
 // (e.g. "① A, D ② A, E ③ A, F ④ D, E ⑤ D, F"), which happens when the options are short.
 // Returns {newIdx, texts} if `line` starts with the mark we're currently expecting, else null.
+// 이미지/표/그림이 필요할 가능성이 있는 문항을 자동으로 감지.
+// (1) "그림", "사진", "배치도" 등 명시적 키워드가 있는 경우
+// (2) "<자료 제목>" 같은 캡션은 있는데 캡션 뒤에 실제 표 데이터가 거의 없는 경우
+//     (원본 PDF에서 표/차트가 이미지로 삽입되어 텍스트 추출이 안 된 경우가 많음)
+const IMAGE_KEYWORDS = ["그림", "사진", "도표", "배치도", "구성도", "회로도", "도면", "이미지"];
+function detectNeedsImage(stem, passage){
+  const combined = (stem||"") + " " + (passage||"");
+  if(IMAGE_KEYWORDS.some(kw=>combined.includes(kw))) return true;
+  const captionMatch = (passage||"").match(/<[^<>]{2,40}>/g);
+  if(captionMatch){
+    const lastCaption = captionMatch[captionMatch.length-1];
+    const afterCaption = passage.slice(passage.lastIndexOf(lastCaption) + lastCaption.length).trim();
+    if(afterCaption.length < 40) return true; // caption present but almost no data after it
+  }
+  return false;
+}
+
 function trySplitChoices(line, startIdx){
   const marks = CIRCLED_MARKS;
   if(!line.startsWith(marks[startIdx])) return null;
@@ -819,7 +856,8 @@ function parseExamText(rawText, fallbackDomain, source){
       items.push({
         domain: currentDomain, source: source || "", stem, passage,
         choices: choices.map(c=>c.trim()).filter(Boolean),
-        answer: "", difficulty: "미정"
+        answer: "", difficulty: "미정",
+        needsImage: detectNeedsImage(stem, passage)
       });
     }
     pending = [];
@@ -903,10 +941,10 @@ document.getElementById("parseBatch").addEventListener("click", ()=>{
   resBox.innerHTML = batchParsed.map((item,i)=>{
     const newText = item.stem+" "+item.passage;
     let best={sim:0,q:null};
-    allQuestions.forEach(q=>{ const sim=diceSim(newText, combinedText(q)); if(sim>best.sim) best={sim,q}; });
+    allQuestions.forEach(q=>{ const sim=combinedSimilarity(newText, item.images, q); if(sim>best.sim) best={sim,q}; });
     for(let j=0;j<i;j++){
       const other = batchParsed[j];
-      const sim = diceSim(newText, other.stem+" "+other.passage);
+      const sim = combinedSimilarity(newText, item.images, {stem:other.stem, passage:other.passage, images:other.images});
       if(sim>best.sim) best={sim, q:{id:"(배치 내 "+(j+1)+"번)", domain:other.domain, stem:other.stem}};
     }
     item._dup = best.sim >= SIM_THRESHOLD;
@@ -914,12 +952,15 @@ document.getElementById("parseBatch").addEventListener("click", ()=>{
     item._sim = best.sim;
     const cls = item._dup ? "dup" : "ok";
     const statusText = item._dup ? ("중복 의심 "+Math.round(best.sim*100)+"% · "+best.q.id) : "등록 가능";
+    const imgWarnBadge = item.needsImage
+      ? '<span style="display:inline-block;background:var(--warn-bg);color:var(--warn);font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:999px;margin-left:6px;">🖼 이미지 첨부 필요</span>'
+      : "";
     return '<div class="batchItem '+cls+'" data-idx="'+i+'">'+
-      '<div class="title">'+(i+1)+'. ['+item.domain+'] '+item.stem.slice(0,50)+'</div>'+
+      '<div class="title">'+(i+1)+'. ['+item.domain+'] '+item.stem.slice(0,50)+imgWarnBadge+'</div>'+
       '<div class="status">'+statusText+'</div>'+
       '<div style="margin-top:8px;display:flex;gap:6px;align-items:center;">'+
-        '<span style="font-size:11px;color:var(--muted);flex-shrink:0;">🖼 이미지 링크(선택)</span>'+
-        '<input type="text" data-imgidx="'+i+'" placeholder="https://drive.google.com/file/d/..." style="flex:1;font-size:11.5px;padding:5px 8px;border:1px solid var(--line);border-radius:6px;">'+
+        '<span style="font-size:11px;color:'+(item.needsImage?'var(--warn)':'var(--muted)')+';flex-shrink:0;font-weight:'+(item.needsImage?'700':'400')+';">🖼 이미지 링크'+(item.needsImage?'(필요)':'(선택)')+'</span>'+
+        '<input type="text" data-imgidx="'+i+'" placeholder="https://drive.google.com/file/d/..." style="flex:1;font-size:11.5px;padding:5px 8px;border:1px solid '+(item.needsImage?'var(--warn)':'var(--line)')+';border-radius:6px;">'+
       '</div>'+
       (item._dup ? '<div class="batchBtns"><button class="btn small ghost" data-batchact="force" data-idx="'+i+'">그래도 등록</button><button class="btn small primary" data-batchact="skip" data-idx="'+i+'">건너뛰기 처리됨</button></div>' : "") +
       '</div>';
@@ -950,7 +991,8 @@ document.getElementById("registerAllOk").addEventListener("click", async ()=>{
   for(const item of batchParsed){
     if(item._skip) continue;
     if(item._dup && !item._forceAdd) continue;
-    await addNew({domain:item.domain, source:item.source, stem:item.stem, passage:item.passage, choices:item.choices, answer:item.answer, difficulty:item.difficulty, images:item.images||[]});
+    const hasImage = (item.images||[]).length > 0;
+    await addNew({domain:item.domain, source:item.source, stem:item.stem, passage:item.passage, choices:item.choices, answer:item.answer, difficulty:item.difficulty, images:item.images||[], needsImage: item.needsImage && !hasImage});
     count++;
   }
   document.getElementById("batchResult").innerHTML += '<div class="okBox">✓ 총 '+count+'개 문항이 등록되었습니다.</div>';
