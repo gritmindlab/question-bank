@@ -30,6 +30,7 @@ const DOMAIN_COLORS = {
 let allQuestions = [];      // live cache from Firestore onSnapshot
 let currentList = [];
 let detailIdx = 0;
+let selectedIds = new Set();
 
 // ---------- similarity ----------
 function normalize(s){ return (s||"").replace(/\s+/g,"").replace(/[.,!?()\[\]{}'"“”·※\-–—:;=]/g,"").toLowerCase(); }
@@ -191,9 +192,14 @@ function getFiltered(){
 function renderTable(){
   renderStats();
   const list = getFiltered();
+  // drop selections that are no longer in the filtered/visible set from stale ids (keep across filter changes, just prune deleted)
+  const allIds = new Set(allQuestions.map(q=>q.id));
+  selectedIds.forEach(id=>{ if(!allIds.has(id)) selectedIds.delete(id); });
+
   const tbody = document.getElementById("tbody");
   if(list.length===0){
     tbody.innerHTML = '<tr><td colspan="9"><div class="emptyrow">조건에 맞는 문제가 없습니다.</div></td></tr>';
+    renderBulkBar();
     return;
   }
   tbody.innerHTML = list.map(q=>{
@@ -202,7 +208,9 @@ function renderTable(){
     const imgCount = (q.images||[]).length;
     const usage = q.usageLog||[];
     const usageShort = usage.length ? usage.map(u=>u.institution).filter(Boolean).join(', ') : '-';
+    const checked = selectedIds.has(q.id) ? 'checked' : '';
     return '<tr>'+
+      '<td><input type="checkbox" class="rowCheck" data-id="'+q.id+'" '+checked+'></td>'+
       '<td class="idcell">'+q.id+'</td>'+
       '<td><span class="domchip" style="color:'+col.c+';background:'+col.bg+'">'+q.domain+'</span></td>'+
       '<td class="stemcell" title="'+ (q.stem||"").replace(/"/g,'&quot;') +'">'+stemShort+'</td>'+
@@ -229,7 +237,48 @@ function renderTable(){
       }
     });
   });
+  tbody.querySelectorAll("input.rowCheck").forEach(cb=>{
+    cb.addEventListener("change", ()=>{
+      const id = cb.getAttribute("data-id");
+      if(cb.checked) selectedIds.add(id); else selectedIds.delete(id);
+      renderBulkBar();
+      updateSelectAllState(list);
+    });
+  });
+  updateSelectAllState(list);
+  renderBulkBar();
 }
+
+function updateSelectAllState(list){
+  const box = document.getElementById("selectAllBox");
+  if(!list.length){ box.checked=false; box.indeterminate=false; return; }
+  const selCount = list.filter(q=>selectedIds.has(q.id)).length;
+  box.checked = selCount === list.length;
+  box.indeterminate = selCount>0 && selCount<list.length;
+}
+document.getElementById("selectAllBox").addEventListener("change", (e)=>{
+  const list = getFiltered();
+  if(e.target.checked) list.forEach(q=>selectedIds.add(q.id));
+  else list.forEach(q=>selectedIds.delete(q.id));
+  renderTable();
+});
+
+function renderBulkBar(){
+  const bar = document.getElementById("bulkBar");
+  const count = selectedIds.size;
+  document.getElementById("bulkCount").textContent = count;
+  bar.style.display = count>0 ? "flex" : "none";
+}
+document.getElementById("bulkClearBtn").addEventListener("click", ()=>{
+  selectedIds.clear();
+  renderTable();
+});
+document.getElementById("bulkDeleteBtn").addEventListener("click", async ()=>{
+  if(!confirm(selectedIds.size+"개 문항을 삭제할까요? (팀 전체 공용 데이터에서 삭제됩니다)")) return;
+  for(const id of Array.from(selectedIds)){ await deleteQuestion(id); }
+  selectedIds.clear();
+  renderTable();
+});
 
 ["searchBox","domainFilter","diffFilter"].forEach(id=>{
   document.getElementById(id).addEventListener("input", renderTable);
@@ -301,6 +350,54 @@ document.getElementById("diffSelect").addEventListener("change", async(e)=>{
 document.getElementById("answerInput").addEventListener("change", async(e)=>{
   const id=currentList[detailIdx].id;
   await updateDoc(doc(db, QUESTIONS_COL, id), { answer: e.target.value, updatedAt: Date.now() });
+});
+
+// ---------- bulk edit modal ----------
+const overlayBulk = document.getElementById("overlayBulk");
+document.getElementById("bulkEditBtn").addEventListener("click", ()=>{
+  document.getElementById("bulkModalCount").textContent = selectedIds.size;
+  document.getElementById("bulk_domain").value = "";
+  document.getElementById("bulk_difficulty").value = "";
+  document.getElementById("bulk_source").value = "";
+  ["bulk_usageInst","bulk_usageWhen","bulk_usageGrade"].forEach(id=>document.getElementById(id).value="");
+  document.getElementById("bulkResult").innerHTML = "";
+  overlayBulk.classList.add("open");
+});
+document.getElementById("cancelBulk").addEventListener("click", ()=>overlayBulk.classList.remove("open"));
+overlayBulk.addEventListener("click", e=>{ if(e.target===overlayBulk) overlayBulk.classList.remove("open"); });
+
+document.getElementById("applyBulk").addEventListener("click", async ()=>{
+  const domain = document.getElementById("bulk_domain").value;
+  const difficulty = document.getElementById("bulk_difficulty").value;
+  const source = document.getElementById("bulk_source").value.trim();
+  const uInst = document.getElementById("bulk_usageInst").value.trim();
+  const uWhen = document.getElementById("bulk_usageWhen").value.trim();
+  const uGrade = document.getElementById("bulk_usageGrade").value.trim();
+  const addUsage = uInst || uWhen || uGrade;
+
+  if(!domain && !difficulty && !source && !addUsage){
+    document.getElementById("bulkResult").innerHTML = '<div class="dupBox"><b>변경할 항목을 하나 이상 입력해주세요.</b></div>';
+    return;
+  }
+
+  let count = 0;
+  for(const id of Array.from(selectedIds)){
+    const q = allQuestions.find(x=>x.id===id);
+    if(!q) continue;
+    const patch = { updatedAt: Date.now() };
+    if(domain) patch.domain = domain;
+    if(difficulty) patch.difficulty = difficulty;
+    if(source) patch.source = source;
+    if(addUsage){
+      const usageLog = (q.usageLog||[]).slice();
+      usageLog.push({institution:uInst, when:uWhen, grade:uGrade});
+      patch.usageLog = usageLog;
+    }
+    await updateDoc(doc(db, QUESTIONS_COL, id), patch);
+    count++;
+  }
+  document.getElementById("bulkResult").innerHTML = '<div class="okBox">✓ '+count+'개 문항이 일괄 수정되었습니다.</div>';
+  setTimeout(()=>{ overlayBulk.classList.remove("open"); selectedIds.clear(); renderTable(); }, 900);
 });
 
 // ---------- single add/edit modal ----------
