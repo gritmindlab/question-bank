@@ -158,8 +158,14 @@ table.qtable tr:hover td{background:#FAFBFD;}
       <select id="domainFilter"></select>
       <select id="diffFilter"><option value="">난이도 전체</option><option>하</option><option>중</option><option>상</option><option>미정</option></select>
     </div>
+    <div id="bulkBar" style="display:none;align-items:center;gap:10px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 14px;margin-bottom:10px;">
+      <span style="font-size:12.5px;font-weight:700;"><span id="bulkCount">0</span>개 선택됨</span>
+      <button class="btn small primary" id="bulkEditBtn">일괄 편집</button>
+      <button class="btn small danger" id="bulkDeleteBtn">일괄 삭제</button>
+      <button class="btn small ghost" id="bulkClearBtn">선택 해제</button>
+    </div>
     <table class="qtable">
-      <thead><tr><th>ID</th><th>영역</th><th>문제</th><th>난이도</th><th>정답</th><th>출처</th><th>사용기관</th><th>이미지</th><th></th></tr></thead>
+      <thead><tr><th style="width:28px;"><input type="checkbox" id="selectAllBox"></th><th>ID</th><th>영역</th><th>문제</th><th>난이도</th><th>정답</th><th>출처</th><th>사용기관</th><th>이미지</th><th></th></tr></thead>
       <tbody id="tbody"></tbody>
     </table>
   </div>
@@ -275,6 +281,48 @@ table.qtable tr:hover td{background:#FAFBFD;}
     <div class="modalbtns" id="batchConfirmRow" style="display:none;">
       <button class="btn primary" id="registerAllOk">중복 없는 문항 전체 등록</button>
     </div>
+  </div>
+</div>
+
+<!-- Bulk edit modal -->
+<div class="overlay" id="overlayBulk">
+  <div class="modal">
+    <h2>일괄 편집</h2>
+    <div class="modalsub"><span id="bulkModalCount">0</span>개 문항에 적용됩니다. 바꾸지 않을 항목은 비워두거나 "변경 안 함"으로 두세요.</div>
+
+    <div class="formgrid2">
+      <div class="formrow"><label>영역</label>
+        <select id="bulk_domain">
+          <option value="">변경 안 함</option>
+          <option>의사소통능력</option><option>수리능력</option><option>문제해결능력</option>
+          <option>자기개발능력</option><option>자원관리능력</option><option>대인관계능력</option>
+          <option>정보능력</option><option>기술능력</option><option>조직이해능력</option><option>직업윤리</option>
+        </select>
+      </div>
+      <div class="formrow"><label>난이도</label>
+        <select id="bulk_difficulty">
+          <option value="">변경 안 함</option>
+          <option>미정</option><option>하</option><option>중</option><option>상</option>
+        </select>
+      </div>
+    </div>
+    <div class="formrow"><label>출처 (입력 시 선택된 문항 모두 이 값으로 변경)</label>
+      <input type="text" id="bulk_source" placeholder="비워두면 변경 안 함">
+    </div>
+
+    <div class="formrow"><label>사용 이력 일괄 추가 (선택된 문항 전체에 이 이력이 추가됩니다)</label>
+      <div class="formgrid2" style="grid-template-columns:1.2fr 1fr 0.8fr;gap:8px;">
+        <input type="text" id="bulk_usageInst" placeholder="예: 조선대">
+        <input type="text" id="bulk_usageWhen" placeholder="예: 2026년 1학기">
+        <input type="text" id="bulk_usageGrade" placeholder="예: 2학년">
+      </div>
+    </div>
+
+    <div class="modalbtns">
+      <button class="btn ghost" id="cancelBulk">취소</button>
+      <button class="btn primary" id="applyBulk">선택 문항에 적용</button>
+    </div>
+    <div id="bulkResult"></div>
   </div>
 </div>
 
