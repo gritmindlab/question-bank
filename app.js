@@ -167,8 +167,11 @@ document.getElementById("seedImportBtn").addEventListener("click", async ()=>{
 function renderStats(){
   const byDomain = {};
   allQuestions.forEach(q=>{ byDomain[q.domain]=(byDomain[q.domain]||0)+1; });
-  let html = '<div class="statchip">전체 <b>'+allQuestions.length+'</b>문항</div>';
-  Object.keys(byDomain).forEach(dom=>{ html += '<div class="statchip">'+dom+' <b>'+byDomain[dom]+'</b></div>'; });
+  const curDomain = document.getElementById("domainFilter").value; // "" = 전체
+  let html = '<button type="button" class="statchip'+(curDomain===""?" active":"")+'" data-statdom="">전체 <b>'+allQuestions.length+'</b>문항</button>';
+  Object.keys(byDomain).forEach(dom=>{
+    html += '<button type="button" class="statchip'+(curDomain===dom?" active":"")+'" data-statdom="'+dom+'">'+dom+' <b>'+byDomain[dom]+'</b></button>';
+  });
   document.getElementById("statrow").innerHTML = html;
   document.getElementById("totalCount").textContent = allQuestions.length;
 
@@ -176,6 +179,23 @@ function renderStats(){
   const cur = domSel.value;
   domSel.innerHTML = '<option value="">영역 전체</option>' + Object.keys(DOMAIN_CODE).map(d=>'<option>'+d+'</option>').join('');
   domSel.value = cur;
+
+  document.getElementById("statrow").querySelectorAll("button[data-statdom]").forEach(btn=>{
+    btn.addEventListener("click", ()=>{
+      const dom = btn.getAttribute("data-statdom");
+      document.getElementById("domainFilter").value = dom;
+      const detailVisible = document.getElementById("detailView").style.display !== "none";
+      if(detailVisible){
+        currentList = getFiltered();
+        detailIdx = 0;
+        if(currentList.length===0){ alert("이 영역에 해당하는 문제가 없습니다."); }
+        renderDetail();
+        renderStats(); // refresh active-state highlighting without full table rebuild
+      } else {
+        renderTable();
+      }
+    });
+  });
 }
 
 function getFiltered(){
@@ -554,6 +574,50 @@ document.getElementById("checkAndUpload").addEventListener("click", async ()=>{
   setTimeout(()=>overlaySingle.classList.remove("open"), 700);
 });
 
+// ---------- file upload: auto-extract text from PDF/DOCX ----------
+if(window.pdfjsLib){
+  window.pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.js";
+}
+
+async function extractPdfText(file){
+  const buf = await file.arrayBuffer();
+  const pdf = await window.pdfjsLib.getDocument({ data: buf }).promise;
+  let text = "";
+  for(let i=1;i<=pdf.numPages;i++){
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    const pageText = content.items.map(it=>it.str).join(" ");
+    text += pageText + "\n";
+  }
+  return text;
+}
+
+async function extractDocxText(file){
+  const buf = await file.arrayBuffer();
+  const result = await window.mammoth.extractRawText({ arrayBuffer: buf });
+  return result.value;
+}
+
+document.getElementById("examFileInput").addEventListener("change", async (e)=>{
+  const file = e.target.files[0];
+  if(!file) return;
+  const statusEl = document.getElementById("fileExtractStatus");
+  statusEl.textContent = "파일에서 텍스트를 추출하는 중...";
+  try{
+    let text = "";
+    const name = file.name.toLowerCase();
+    if(name.endsWith(".pdf")) text = await extractPdfText(file);
+    else if(name.endsWith(".docx")) text = await extractDocxText(file);
+    else { statusEl.textContent = "PDF 또는 DOCX 파일만 지원돼요."; return; }
+
+    document.getElementById("batchInput").value = text;
+    statusEl.textContent = "✓ 텍스트를 추출했어요. 아래 내용을 확인하고 '분석하기'를 눌러주세요 (표/이미지 있는 문제는 별도로 확인이 필요할 수 있어요).";
+  }catch(err){
+    console.error(err);
+    statusEl.textContent = "추출에 실패했어요. 파일이 손상되었거나 지원하지 않는 형식일 수 있어요.";
+  }
+});
+
 // ---------- batch modal ----------
 const overlayBatch = document.getElementById("overlayBatch");
 const TEMPLATE = "[영역] 의사소통능력\n[출처] \n[문제] \n[지문] \n[보기]\n1) \n2) \n3) \n4) \n5) \n[정답] \n[난이도] 미정\n=====\n";
@@ -733,9 +797,20 @@ document.getElementById("parseBatch").addEventListener("click", ()=>{
     return '<div class="batchItem '+cls+'" data-idx="'+i+'">'+
       '<div class="title">'+(i+1)+'. ['+item.domain+'] '+item.stem.slice(0,50)+'</div>'+
       '<div class="status">'+statusText+'</div>'+
+      '<div style="margin-top:8px;display:flex;gap:6px;align-items:center;">'+
+        '<span style="font-size:11px;color:var(--muted);flex-shrink:0;">🖼 이미지 링크(선택)</span>'+
+        '<input type="text" data-imgidx="'+i+'" placeholder="https://drive.google.com/file/d/..." style="flex:1;font-size:11.5px;padding:5px 8px;border:1px solid var(--line);border-radius:6px;">'+
+      '</div>'+
       (item._dup ? '<div class="batchBtns"><button class="btn small ghost" data-batchact="force" data-idx="'+i+'">그래도 등록</button><button class="btn small primary" data-batchact="skip" data-idx="'+i+'">건너뛰기 처리됨</button></div>' : "") +
       '</div>';
   }).join("");
+
+  resBox.querySelectorAll("input[data-imgidx]").forEach(inp=>{
+    inp.addEventListener("change", ()=>{
+      const idx = parseInt(inp.getAttribute("data-imgidx"),10);
+      batchParsed[idx].images = inp.value.trim() ? [inp.value.trim()] : [];
+    });
+  });
 
   resBox.querySelectorAll("button[data-batchact]").forEach(btn=>{
     btn.addEventListener("click", ()=>{
@@ -755,7 +830,7 @@ document.getElementById("registerAllOk").addEventListener("click", async ()=>{
   for(const item of batchParsed){
     if(item._skip) continue;
     if(item._dup && !item._forceAdd) continue;
-    await addNew({domain:item.domain, source:item.source, stem:item.stem, passage:item.passage, choices:item.choices, answer:item.answer, difficulty:item.difficulty, images:[]});
+    await addNew({domain:item.domain, source:item.source, stem:item.stem, passage:item.passage, choices:item.choices, answer:item.answer, difficulty:item.difficulty, images:item.images||[]});
     count++;
   }
   document.getElementById("batchResult").innerHTML += '<div class="okBox">✓ 총 '+count+'개 문항이 등록되었습니다.</div>';
