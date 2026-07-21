@@ -718,11 +718,13 @@ function parseBlock(text){
   };
 }
 
-// 시험지 형식 자동인식: "1. 문제..." 로 시작, "① ② ③ ④ ⑤"로 보기 구분,
+// 시험지 형식 자동인식: ①②③④⑤가 순서대로 5개 나오는 지점을 "문제 끝"으로 판단.
+// (지문 속 법조문/공문서에 나오는 일반 숫자 "1. 2. 3."은 건드리지 않고,
+//  실제 보기에서만 쓰이는 동그라미 숫자만 문제 경계로 사용하므로 훨씬 안전함)
 // "의사소통능력 1~10번" 같은 영역 제목을 만나면 이후 문항의 영역을 자동 전환
 const NOISE_PATTERNS = [
   /^직업기초능력평가$/, /^NCS\s*실전모의고사/, /^혼합형/, /^학교맞춤/, /^Copyright/i,
-  /^\(계속\)$/, /^-끝-$/, /^문제의 답을 다시/, /^문항\s*수/, /^시험시간/, /^\d+\/\d+$/
+  /^\(계속\s*\)$/, /^-\s*끝\s*-$/, /^문제의 답을 다시/, /^문항\s*수/, /^시험시간/, /^\d+\/\d+$/
 ];
 const DOMAIN_NAMES = Object.keys(DOMAIN_CODE);
 function detectDomainHeader(line){
@@ -734,66 +736,124 @@ function detectDomainHeader(line){
 }
 function isNoise(line){ return NOISE_PATTERNS.some(re=>re.test(line.trim())); }
 
+const CIRCLED_MARKS = ["①","②","③","④","⑤"];
+const CIRCLED_SPLIT_RE = /([①②③④⑤])/;
+
+// Handles both "one choice per line" and "all five choices packed onto one line"
+// (e.g. "① A, D ② A, E ③ A, F ④ D, E ⑤ D, F"), which happens when the options are short.
+// Returns {newIdx, texts} if `line` starts with the mark we're currently expecting, else null.
+function trySplitChoices(line, startIdx){
+  const marks = CIRCLED_MARKS;
+  if(!line.startsWith(marks[startIdx])) return null;
+  const parts = line.split(CIRCLED_SPLIT_RE).filter(s=>s!=="");
+  let idx = startIdx;
+  const texts = [];
+  let i = 0;
+  while(i < parts.length){
+    if(parts[i] === marks[idx]){
+      texts.push((parts[i+1]!==undefined ? parts[i+1] : "").trim());
+      idx++;
+      i += 2;
+    } else break;
+  }
+  return {newIdx: idx, texts};
+}
+
 function parseExamText(rawText, fallbackDomain, source){
-  const lines = rawText.split("\n");
+  const lines = rawText.split("\n").map(l=>l.replace(/\r$/,"").trim()).filter(l=>l);
   let currentDomain = fallbackDomain;
   const items = [];
-  let cur = null;          // {domain, num, buffer:[], choices:[]}
-  let expectedNext = null; // only a numbered line matching this exact count starts a new question
-                           // (prevents numbered lists inside a passage, e.g. law clauses "1. ... 2. ...",
-                           //  from being mistaken for new questions). null = no question seen yet,
-                           // so the very first numbered line found is always accepted as question 1.
 
-  function flush(){
-    if(!cur) return;
-    const bufText = cur.buffer.join("\n").trim();
-    if(!bufText && cur.choices.length===0) { cur=null; return; }
-    let stem = bufText, passage = "";
-    const qIdx = bufText.indexOf("?");
-    if(qIdx >= 0){
-      stem = bufText.slice(0, qIdx+1).trim();
-      passage = bufText.slice(qIdx+1).trim();
+  let pending = [];       // lines accumulated for the current question's stem+passage (before its choices)
+  let choices = [];       // choice texts collected so far for the current question
+  let expectingIdx = 0;   // index (0~4) into CIRCLED_MARKS of the next choice marker we need to see
+  let choicesComplete = false; // true once all 5 circled choices have been seen (may still be mid-wrap)
+  let lastQNum = null;    // question number of the most recently finalized question, used to sanity-check
+                          // same-page adjacent questions (e.g. paired 14-15 questions with no page break
+                          // between them) without being fooled by numbered sub-clauses inside law/regulation
+                          // passages that happen to increment the same way.
+
+  function numberOf(lineList){
+    for(const l of lineList){
+      const m = l.match(/^(\d{1,3})[.\)]\s*\S/);
+      if(m) return parseInt(m[1],10);
     }
-    items.push({
-      domain: cur.domain, source: source || "", stem, passage,
-      choices: cur.choices.map(c=>c.trim()).filter(Boolean),
-      answer: "", difficulty: "미정"
-    });
-    expectedNext = cur.num + 1;
-    cur = null;
+    return null;
   }
 
-  lines.forEach(rawLine=>{
-    const line = rawLine.replace(/\r$/,"");
-    const trimmed = line.trim();
-    if(!trimmed) return;
-    if(isNoise(trimmed)) return;
+  function finalizeQuestion(){
+    const bufText = pending.join("\n").trim();
+    if(bufText || choices.length){
+      const foundNum = numberOf(pending);
+      if(foundNum!==null) lastQNum = foundNum;
+      let stem = bufText, passage = "";
+      const qIdx = bufText.indexOf("?");
+      if(qIdx >= 0){
+        stem = bufText.slice(0, qIdx+1).trim();
+        passage = bufText.slice(qIdx+1).trim();
+      }
+      stem = stem.replace(/^\d{1,3}[.\)]\s*/, "").trim(); // strip leading "N." question number
+      items.push({
+        domain: currentDomain, source: source || "", stem, passage,
+        choices: choices.map(c=>c.trim()).filter(Boolean),
+        answer: "", difficulty: "미정"
+      });
+    }
+    pending = [];
+    choices = [];
+    expectingIdx = 0;
+    choicesComplete = false;
+  }
 
+  lines.forEach(trimmed=>{
+    if(isNoise(trimmed)){
+      if(choicesComplete) finalizeQuestion();
+      return; // noise lines are never kept as content
+    }
     const domHeader = detectDomainHeader(trimmed);
-    if(domHeader){ currentDomain = domHeader; return; }
-
-    const qMatch = trimmed.match(/^(\d{1,3})[.\)]\s*(.*)/);
-    const circledMatch = trimmed.match(/^([①②③④⑤])\s*(.*)/);
-
-    const qNum = qMatch ? parseInt(qMatch[1],10) : null;
-    if(qMatch && (expectedNext===null || qNum===expectedNext)){
-      flush();
-      cur = { domain: currentDomain, num: qNum, buffer: [qMatch[2]], choices: [] };
+    if(domHeader){
+      if(choicesComplete) finalizeQuestion();
+      currentDomain = domHeader;
       return;
     }
-    if(circledMatch && cur){
-      cur.choices.push(circledMatch[2]);
-      return;
-    }
-    if(cur){
-      if(cur.choices.length>0){
-        cur.choices[cur.choices.length-1] += " " + trimmed;
-      } else {
-        cur.buffer.push(trimmed);
+
+    // Same-page adjacent question (no page-break noise in between), e.g. paired 14-15 style questions:
+    // only trust a numbered line as a genuine new-question boundary if its number is exactly one more
+    // than the question currently being accumulated (or, failing that, one more than the last finalized
+    // question) — this avoids being fooled by numbered sub-clauses inside law/regulation passages, which
+    // essentially never happen to hit that exact number.
+    if(choicesComplete){
+      const m = trimmed.match(/^(\d{1,3})[.\)]\s*\S/);
+      if(m){
+        const n = parseInt(m[1],10);
+        const curNum = numberOf(pending);
+        const expected = (curNum!==null ? curNum : lastQNum);
+        if(expected!==null && n===expected+1){
+          finalizeQuestion();
+          pending.push(trimmed);
+          return;
+        }
       }
     }
+
+    const splitResult = !choicesComplete ? trySplitChoices(trimmed, expectingIdx) : null;
+    if(splitResult && splitResult.texts.length>0){
+      splitResult.texts.forEach(t=>choices.push(t));
+      expectingIdx = splitResult.newIdx;
+      if(expectingIdx === CIRCLED_MARKS.length) choicesComplete = true; // wait for a page-break/header before finalizing
+      return;
+    }
+    // a line that isn't the next expected marker: either mid-choice wrap text, or trailing wrap
+    // text after the 5th choice, or (for a handful of law/regulation-citing questions) leftover
+    // clause text that reused circled numerals — in all these cases it safely belongs with the
+    // most recently collected choice rather than starting a new question.
+    if(choices.length>0 && (choicesComplete || (expectingIdx>0 && expectingIdx<CIRCLED_MARKS.length))){
+      choices[choices.length-1] += " " + trimmed;
+      return;
+    }
+    pending.push(trimmed);
   });
-  flush();
+  if(pending.length || choices.length) finalizeQuestion();
   return items.filter(it=>it.stem);
 }
 
