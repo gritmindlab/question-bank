@@ -430,6 +430,25 @@ async function flushDetailEdits(){
   if(Object.keys(patch).length) await saveDetailPatch(patch);
 }
 
+// index.html이 옛 버전이어도 저장 버튼이 사이드카드(정답 밑)에 생기도록 보강
+function ensureDetailSaveUI(){
+  if(document.getElementById("detailSaveBtn")) return; // 이미 HTML에 있으면 그대로 사용
+  const answer = document.getElementById("answerInput");
+  if(!answer) return;
+  const field = answer.closest(".field") || answer.parentElement;
+  const btn = document.createElement("button");
+  btn.id = "detailSaveBtn";
+  btn.className = "btn primary small";
+  btn.style.cssText = "width:100%;margin-top:4px;";
+  btn.textContent = "저장";
+  const status = document.createElement("div");
+  status.id = "detailSaveStatus";
+  status.style.cssText = "font-size:11px;font-family:var(--mono);color:var(--muted);text-align:center;margin-top:6px;min-height:14px;";
+  field.insertAdjacentElement("afterend", btn);
+  btn.insertAdjacentElement("afterend", status);
+}
+ensureDetailSaveUI();
+
 document.getElementById("prevBtn").addEventListener("click", async ()=>{ if(detailIdx>0){ await flushDetailEdits(); detailIdx--; renderDetail(); } });
 document.getElementById("nextBtn").addEventListener("click", async ()=>{ if(detailIdx<currentList.length-1){ await flushDetailEdits(); detailIdx++; renderDetail(); } });
 document.getElementById("detailSaveBtn").addEventListener("click", async ()=>{ await flushDetailEdits(); setSaveStatus("저장됨 ✓", "ok"); });
