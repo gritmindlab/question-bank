@@ -71,14 +71,40 @@ table.qtable tr:hover td{background:#FAFBFD;}
 .field select,.field input{width:100%;font-family:var(--mono);font-size:14px;font-weight:600;border:1.5px solid var(--line);border-radius:8px;padding:7px 8px;background:#fbfcfe;}
 .versionTag{font-size:10.5px;color:var(--muted);font-family:var(--mono);margin-top:2px;}
 .maincard{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:28px 32px;min-height:380px;}
-.qnum{font-family:var(--mono);font-size:12px;color:var(--muted);margin-bottom:10px;}
-.stem{font-size:17px;font-weight:700;line-height:1.55;margin-bottom:14px;}
+.qnumRow{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;gap:10px;}
+.qnum{font-family:var(--mono);font-size:12px;color:var(--muted);}
+.editModeNote{font-size:11px;color:var(--ring);font-weight:700;display:none;align-items:center;gap:5px;}
+
+/* 상세보기 편집: 기본은 읽기전용, "편집" 버튼을 눌러야 발문/지문/보기 수정 가능 */
+.stem{
+  display:block;width:100%;font-family:inherit;font-size:17px;font-weight:700;line-height:1.55;
+  margin-bottom:14px;border:1.5px solid transparent;border-radius:8px;padding:8px 10px;margin-left:-10px;
+  background:transparent;resize:none;overflow:hidden;color:var(--ink);cursor:default;
+}
 .imgs{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;}
 .imgs img{max-width:260px;max-height:200px;border-radius:8px;border:1px solid var(--line);object-fit:contain;}
-.passage{background:#F7F8FB;border-left:3px solid var(--line);border-radius:8px;padding:16px 18px;font-size:13.5px;line-height:1.75;white-space:pre-wrap;color:#333B4D;margin-bottom:20px;max-height:240px;overflow-y:auto;}
+.passage{
+  display:block;width:100%;font-family:inherit;background:#F7F8FB;border-left:3px solid var(--line);
+  border-top:1.5px solid transparent;border-right:1.5px solid transparent;border-bottom:1.5px solid transparent;
+  border-radius:8px;padding:16px 18px;font-size:13.5px;line-height:1.75;white-space:pre-wrap;color:#333B4D;
+  margin-bottom:20px;resize:none;overflow:hidden;min-height:48px;cursor:default;
+}
+.passage::placeholder{color:var(--muted);font-family:'Pretendard',sans-serif;}
 .choices{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:9px;}
-.choices li{display:flex;gap:10px;font-size:14.5px;line-height:1.55;padding:11px 14px;border:1.5px solid var(--line);border-radius:10px;}
-.cnum{font-family:var(--mono);font-weight:700;color:var(--ring);flex-shrink:0;}
+.choices li{display:flex;gap:10px;align-items:flex-start;font-size:14.5px;line-height:1.55;padding:7px 8px 7px 14px;border:1.5px solid var(--line);border-radius:10px;}
+.cnum{font-family:var(--mono);font-weight:700;color:var(--ring);flex-shrink:0;padding-top:6px;}
+.choices li textarea{
+  flex:1;width:100%;font-family:inherit;font-size:14.5px;line-height:1.55;color:var(--ink);
+  border:1.5px solid transparent;border-radius:7px;padding:6px 8px;background:transparent;resize:none;overflow:hidden;cursor:default;
+}
+/* 편집 모드일 때만(readonly가 풀렸을 때만) 입력 가능한 느낌을 준다 */
+.stem:not([readonly]),.passage:not([readonly]),.choices li textarea:not([readonly]){cursor:text;}
+.stem:not([readonly]):hover,.choices li textarea:not([readonly]):hover{background:#FAFBFD;}
+.passage:not([readonly]):hover{background:#F1F3F9;}
+.stem:not([readonly]):focus,.passage:not([readonly]):focus,.choices li textarea:not([readonly]):focus{
+  outline:none;border-color:var(--ring);background:#fff;box-shadow:0 0 0 3px rgba(47,111,109,.10);
+}
+.editing .maincard{border-color:var(--ring);box-shadow:0 0 0 3px rgba(47,111,109,.08);}
 .navbar{display:flex;align-items:center;justify-content:center;gap:22px;margin-top:22px;}
 .navbtn{width:42px;height:42px;border-radius:50%;border:1.5px solid var(--line);background:var(--card);cursor:pointer;display:flex;align-items:center;justify-content:center;}
 .navbtn:hover:not(:disabled){background:var(--primary-2);color:#fff;}
@@ -193,11 +219,17 @@ table.qtable tr:hover td{background:#FAFBFD;}
         <div id="detailSaveStatus" style="font-size:11px;font-family:var(--mono);color:var(--muted);text-align:center;margin-top:6px;min-height:14px;"></div>
         <div class="versionTag" id="versionTag"></div>
       </div>
-      <div class="maincard">
-        <div class="qnum" id="qnumLabel">문항 1 / 1</div>
-        <div class="stem" id="stemText"></div>
+      <div class="maincard" id="maincard">
+        <div class="qnumRow">
+          <div class="qnum" id="qnumLabel">문항 1 / 1</div>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span class="editModeNote" id="editModeNote">✏️ 편집 중 — 완료를 누르면 저장됩니다</span>
+            <button type="button" class="btn small ghost" id="detailEditToggle">✏️ 편집</button>
+          </div>
+        </div>
+        <textarea class="stem" id="stemText" rows="1" placeholder="문제(발문)를 입력하세요" readonly></textarea>
         <div class="imgs" id="imgsBox"></div>
-        <div class="passage" id="passageBox" style="display:none;"></div>
+        <textarea class="passage" id="passageBox" rows="1" placeholder="지문/자료 없음 — 필요하면 여기에 입력해서 추가할 수 있어요" readonly></textarea>
         <ul class="choices" id="choicesList"></ul>
       </div>
     </div>
@@ -287,6 +319,15 @@ table.qtable tr:hover td{background:#FAFBFD;}
         </select>
       </div>
       <div class="formrow"><label>출처</label><input id="batch_source" placeholder="예: 한신대 2025 모의고사"></div>
+    </div>
+
+    <div class="formrow" style="margin-bottom:14px;">
+      <label>사용 이력 (선택) — 입력하면 새로 등록되는 문항 전체에 적용되고, 중복으로 뜬 문항은 새로 등록하는 대신 이 이력만 기존 문항에 추가할 수 있어요</label>
+      <div class="formgrid2" style="grid-template-columns:1.2fr 1fr 0.8fr;gap:8px;">
+        <input type="text" id="batch_usageInst" placeholder="예: 한신대">
+        <input type="text" id="batch_usageWhen" placeholder="예: 2026년 1학기">
+        <input type="text" id="batch_usageGrade" placeholder="예: 3학년">
+      </div>
     </div>
 
     <div class="formrow" id="fileDropZone" style="border:1.5px dashed var(--line);border-radius:10px;padding:14px;background:#F9FAFC;transition:all .15s ease;">
