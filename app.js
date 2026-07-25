@@ -127,7 +127,7 @@ async function addNew(form){
     id, domain: form.domain, stem: form.stem, passage: form.passage,
     choices: form.choices, source: form.source || "그릿마인드랩 자체 제작",
     images: form.images||[], usageLog: form.usageLog||[],
-    answer: form.answer, difficulty: form.difficulty,
+    answer: form.answer, difficulty: form.difficulty, type: form.type || "미정",
     needsImage: !!form.needsImage,
     version: 1, history: [], deleted: false,
     createdAt: Date.now(), updatedAt: Date.now()
@@ -142,13 +142,13 @@ async function applyReplace(id, form){
   const history = prev.history || [];
   history.push({
     stem:prev.stem, passage:prev.passage, choices:prev.choices, answer:prev.answer,
-    difficulty:prev.difficulty, images:prev.images, replacedAt: Date.now()
+    difficulty:prev.difficulty, type:prev.type, images:prev.images, replacedAt: Date.now()
   });
   await updateDoc(doc(db, QUESTIONS_COL, id), {
     stem: form.stem, passage: form.passage, choices: form.choices,
     source: form.source || prev.source, images: form.images||[],
     usageLog: form.usageLog||[],
-    answer: form.answer, difficulty: form.difficulty,
+    answer: form.answer, difficulty: form.difficulty, type: form.type,
     version: (prev.version||1)+1, history, updatedAt: Date.now()
   });
 }
@@ -214,10 +214,12 @@ function getFiltered(){
   const q = document.getElementById("searchBox").value.trim().toLowerCase();
   const dom = document.getElementById("domainFilter").value;
   const diff = document.getElementById("diffFilter").value;
+  const type = document.getElementById("typeFilter").value;
   const imgNeed = document.getElementById("imgNeedFilter").value;
   let list = allQuestions.slice();
   if(dom) list = list.filter(x=>x.domain===dom);
   if(diff) list = list.filter(x=>(x.difficulty||"미정")===diff);
+  if(type) list = list.filter(x=>(x.type||"미정")===type);
   if(imgNeed==="needed") list = list.filter(x=>x.needsImage && (x.images||[]).length===0);
   if(q) list = list.filter(x => (x.id+" "+x.stem+" "+(x.passage||"")+" "+(x.source||"")).toLowerCase().includes(q));
   return list;
@@ -232,7 +234,7 @@ function renderTable(){
 
   const tbody = document.getElementById("tbody");
   if(list.length===0){
-    tbody.innerHTML = '<tr><td colspan="9"><div class="emptyrow">조건에 맞는 문제가 없습니다.</div></td></tr>';
+    tbody.innerHTML = '<tr><td colspan="11"><div class="emptyrow">조건에 맞는 문제가 없습니다.</div></td></tr>';
     renderBulkBar();
     return;
   }
@@ -247,6 +249,7 @@ function renderTable(){
       '<td><input type="checkbox" class="rowCheck" data-id="'+q.id+'" '+checked+'></td>'+
       '<td class="idcell">'+q.id+'</td>'+
       '<td><span class="domchip" style="color:'+col.c+';background:'+col.bg+'">'+q.domain+'</span></td>'+
+      '<td>'+ (q.type||"미정") +'</td>'+
       '<td class="stemcell" title="'+ (q.stem||"").replace(/"/g,'&quot;') +'">'+stemShort+'</td>'+
       '<td>'+ (q.difficulty||"미정") +'</td>'+
       '<td class="idcell">'+ (q.answer||"-") +'</td>'+
@@ -314,7 +317,7 @@ document.getElementById("bulkDeleteBtn").addEventListener("click", async ()=>{
   renderTable();
 });
 
-["searchBox","domainFilter","diffFilter","imgNeedFilter"].forEach(id=>{
+["searchBox","domainFilter","diffFilter","typeFilter","imgNeedFilter"].forEach(id=>{
   document.getElementById(id).addEventListener("input", renderTable);
   document.getElementById(id).addEventListener("change", renderTable);
 });
@@ -376,6 +379,7 @@ function renderDetail(){
   const marks=['①','②','③','④','⑤'];
   (q.choices||[]).forEach((c,i)=>{ const li=document.createElement("li"); li.innerHTML='<span class="cnum">'+marks[i]+'</span><span>'+c+'</span>'; list.appendChild(li); });
   document.getElementById("diffSelect").value = q.difficulty||"미정";
+  document.getElementById("typeSelect").value = q.type||"미정";
   document.getElementById("answerInput").value = q.answer||"";
   document.getElementById("versionTag").textContent = q.version&&q.version>1 ? ("v"+q.version+" · 이전 버전 "+(q.history?q.history.length:0)+"건 보관") : "";
   document.getElementById("prevBtn").disabled = detailIdx===0;
@@ -386,6 +390,10 @@ document.getElementById("nextBtn").addEventListener("click", ()=>{ if(detailIdx<
 document.getElementById("diffSelect").addEventListener("change", async(e)=>{
   const id=currentList[detailIdx].id;
   await updateDoc(doc(db, QUESTIONS_COL, id), { difficulty: e.target.value, updatedAt: Date.now() });
+});
+document.getElementById("typeSelect").addEventListener("change", async(e)=>{
+  const id=currentList[detailIdx].id;
+  await updateDoc(doc(db, QUESTIONS_COL, id), { type: e.target.value, updatedAt: Date.now() });
 });
 document.getElementById("answerInput").addEventListener("change", async(e)=>{
   const id=currentList[detailIdx].id;
@@ -398,6 +406,7 @@ document.getElementById("bulkEditBtn").addEventListener("click", ()=>{
   document.getElementById("bulkModalCount").textContent = selectedIds.size;
   document.getElementById("bulk_domain").value = "";
   document.getElementById("bulk_difficulty").value = "";
+  document.getElementById("bulk_type").value = "";
   document.getElementById("bulk_source").value = "";
   ["bulk_usageInst","bulk_usageWhen","bulk_usageGrade"].forEach(id=>document.getElementById(id).value="");
   document.getElementById("bulkResult").innerHTML = "";
@@ -410,13 +419,14 @@ overlayBulk.addEventListener("click", e=>{ if(e.target===overlayBulk) overlayBul
 document.getElementById("applyBulk").addEventListener("click", async ()=>{
   const domain = document.getElementById("bulk_domain").value;
   const difficulty = document.getElementById("bulk_difficulty").value;
+  const type = document.getElementById("bulk_type").value;
   const source = document.getElementById("bulk_source").value.trim();
   const uInst = document.getElementById("bulk_usageInst").value.trim();
   const uWhen = document.getElementById("bulk_usageWhen").value.trim();
   const uGrade = document.getElementById("bulk_usageGrade").value.trim();
   const addUsage = uInst || uWhen || uGrade;
 
-  if(!domain && !difficulty && !source && !addUsage){
+  if(!domain && !difficulty && !type && !source && !addUsage){
     document.getElementById("bulkResult").innerHTML = '<div class="dupBox"><b>변경할 항목을 하나 이상 입력해주세요.</b></div>';
     return;
   }
@@ -428,6 +438,7 @@ document.getElementById("applyBulk").addEventListener("click", async ()=>{
     const patch = { updatedAt: Date.now() };
     if(domain) patch.domain = domain;
     if(difficulty) patch.difficulty = difficulty;
+    if(type) patch.type = type;
     if(source) patch.source = source;
     if(addUsage){
       const usageLog = (q.usageLog||[]).slice();
@@ -451,6 +462,7 @@ function resetSingleForm(){
   [1,2,3,4,5].forEach(n=>document.getElementById("f_c"+n).value="");
   document.getElementById("f_domain").value="의사소통능력";
   document.getElementById("f_difficulty").value="미정";
+  document.getElementById("f_type").value="미정";
   document.getElementById("f_imageLinkInput").value="";
   document.getElementById("f_imgPreview").innerHTML="";
   ["f_usageInst","f_usageWhen","f_usageGrade"].forEach(id=>document.getElementById(id).value="");
@@ -476,6 +488,7 @@ function openEditFor(id){
   [1,2,3,4,5].forEach(n=>document.getElementById("f_c"+n).value=(q.choices||[])[n-1]||"");
   document.getElementById("f_answer").value = q.answer||"";
   document.getElementById("f_difficulty").value = q.difficulty||"미정";
+  document.getElementById("f_type").value = q.type||"미정";
   document.getElementById("f_imageLinkInput").value="";
   pendingImages = (q.images||[]).slice();
   renderImgPreview();
@@ -549,6 +562,7 @@ function readForm(){
     choices: [1,2,3,4,5].map(n=>document.getElementById("f_c"+n).value.trim()).filter(v=>v),
     answer: document.getElementById("f_answer").value.trim(),
     difficulty: document.getElementById("f_difficulty").value,
+    type: document.getElementById("f_type").value,
     images: pendingImages.slice(),
     usageLog: pendingUsage.slice()
   };
