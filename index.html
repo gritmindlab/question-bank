@@ -189,6 +189,8 @@ table.qtable tr:hover td{background:#FAFBFD;}
         <div class="field"><label>유형</label><select id="typeSelect"><option>미정</option><option>모듈형</option><option>피듈형</option><option>PSAT형</option><option>직무형</option></select></div>
         <div class="field"><label>세부유형</label><input id="subTypeInput" placeholder="직접 입력"></div>
         <div class="field"><label>정답</label><input id="answerInput" placeholder="예: 3" maxlength="1"></div>
+        <button class="btn primary small" id="detailSaveBtn" style="width:100%;margin-top:4px;">저장</button>
+        <div id="detailSaveStatus" style="font-size:11px;font-family:var(--mono);color:var(--muted);text-align:center;margin-top:6px;min-height:14px;"></div>
         <div class="versionTag" id="versionTag"></div>
       </div>
       <div class="maincard">
@@ -203,10 +205,6 @@ table.qtable tr:hover td{background:#FAFBFD;}
       <button class="navbtn" id="prevBtn">◀</button>
       <span class="idcell" id="detailPos"></span>
       <button class="navbtn" id="nextBtn">▶</button>
-    </div>
-    <div style="display:flex;justify-content:center;align-items:center;gap:12px;margin-top:12px;">
-      <button class="btn ghost small" id="detailSaveBtn">저장</button>
-      <span id="detailSaveStatus" style="font-size:11.5px;font-family:var(--mono);color:var(--muted);"></span>
     </div>
   </div>
 </div>
