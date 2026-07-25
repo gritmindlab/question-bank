@@ -127,7 +127,7 @@ async function addNew(form){
     id, domain: form.domain, stem: form.stem, passage: form.passage,
     choices: form.choices, source: form.source || "그릿마인드랩 자체 제작",
     images: form.images||[], usageLog: form.usageLog||[],
-    answer: form.answer, difficulty: form.difficulty, type: form.type || "미정",
+    answer: form.answer, difficulty: form.difficulty, type: form.type || "미정", subType: form.subType || "",
     needsImage: !!form.needsImage,
     version: 1, history: [], deleted: false,
     createdAt: Date.now(), updatedAt: Date.now()
@@ -142,13 +142,13 @@ async function applyReplace(id, form){
   const history = prev.history || [];
   history.push({
     stem:prev.stem, passage:prev.passage, choices:prev.choices, answer:prev.answer,
-    difficulty:prev.difficulty, type:prev.type, images:prev.images, replacedAt: Date.now()
+    difficulty:prev.difficulty, type:prev.type, subType:prev.subType, images:prev.images, replacedAt: Date.now()
   });
   await updateDoc(doc(db, QUESTIONS_COL, id), {
     stem: form.stem, passage: form.passage, choices: form.choices,
     source: form.source || prev.source, images: form.images||[],
     usageLog: form.usageLog||[],
-    answer: form.answer, difficulty: form.difficulty, type: form.type,
+    answer: form.answer, difficulty: form.difficulty, type: form.type, subType: form.subType,
     version: (prev.version||1)+1, history, updatedAt: Date.now()
   });
 }
@@ -221,7 +221,7 @@ function getFiltered(){
   if(diff) list = list.filter(x=>(x.difficulty||"미정")===diff);
   if(type) list = list.filter(x=>(x.type||"미정")===type);
   if(imgNeed==="needed") list = list.filter(x=>x.needsImage && (x.images||[]).length===0);
-  if(q) list = list.filter(x => (x.id+" "+x.stem+" "+(x.passage||"")+" "+(x.source||"")).toLowerCase().includes(q));
+  if(q) list = list.filter(x => (x.id+" "+x.stem+" "+(x.passage||"")+" "+(x.source||"")+" "+(x.type||"")+" "+(x.subType||"")).toLowerCase().includes(q));
   return list;
 }
 
@@ -234,7 +234,7 @@ function renderTable(){
 
   const tbody = document.getElementById("tbody");
   if(list.length===0){
-    tbody.innerHTML = '<tr><td colspan="11"><div class="emptyrow">조건에 맞는 문제가 없습니다.</div></td></tr>';
+    tbody.innerHTML = '<tr><td colspan="12"><div class="emptyrow">조건에 맞는 문제가 없습니다.</div></td></tr>';
     renderBulkBar();
     return;
   }
@@ -250,6 +250,7 @@ function renderTable(){
       '<td class="idcell">'+q.id+'</td>'+
       '<td><span class="domchip" style="color:'+col.c+';background:'+col.bg+'">'+q.domain+'</span></td>'+
       '<td>'+ (q.type||"미정") +'</td>'+
+      '<td style="font-size:12px;color:var(--muted);">'+ (q.subType||"-") +'</td>'+
       '<td class="stemcell" title="'+ (q.stem||"").replace(/"/g,'&quot;') +'">'+stemShort+'</td>'+
       '<td>'+ (q.difficulty||"미정") +'</td>'+
       '<td class="idcell">'+ (q.answer||"-") +'</td>'+
@@ -380,6 +381,7 @@ function renderDetail(){
   (q.choices||[]).forEach((c,i)=>{ const li=document.createElement("li"); li.innerHTML='<span class="cnum">'+marks[i]+'</span><span>'+c+'</span>'; list.appendChild(li); });
   document.getElementById("diffSelect").value = q.difficulty||"미정";
   document.getElementById("typeSelect").value = q.type||"미정";
+  document.getElementById("subTypeInput").value = q.subType||"";
   document.getElementById("answerInput").value = q.answer||"";
   document.getElementById("versionTag").textContent = q.version&&q.version>1 ? ("v"+q.version+" · 이전 버전 "+(q.history?q.history.length:0)+"건 보관") : "";
   document.getElementById("prevBtn").disabled = detailIdx===0;
@@ -395,6 +397,10 @@ document.getElementById("typeSelect").addEventListener("change", async(e)=>{
   const id=currentList[detailIdx].id;
   await updateDoc(doc(db, QUESTIONS_COL, id), { type: e.target.value, updatedAt: Date.now() });
 });
+document.getElementById("subTypeInput").addEventListener("change", async(e)=>{
+  const id=currentList[detailIdx].id;
+  await updateDoc(doc(db, QUESTIONS_COL, id), { subType: e.target.value.trim(), updatedAt: Date.now() });
+});
 document.getElementById("answerInput").addEventListener("change", async(e)=>{
   const id=currentList[detailIdx].id;
   await updateDoc(doc(db, QUESTIONS_COL, id), { answer: e.target.value, updatedAt: Date.now() });
@@ -407,6 +413,7 @@ document.getElementById("bulkEditBtn").addEventListener("click", ()=>{
   document.getElementById("bulk_domain").value = "";
   document.getElementById("bulk_difficulty").value = "";
   document.getElementById("bulk_type").value = "";
+  document.getElementById("bulk_subType").value = "";
   document.getElementById("bulk_source").value = "";
   ["bulk_usageInst","bulk_usageWhen","bulk_usageGrade"].forEach(id=>document.getElementById(id).value="");
   document.getElementById("bulkResult").innerHTML = "";
@@ -420,13 +427,14 @@ document.getElementById("applyBulk").addEventListener("click", async ()=>{
   const domain = document.getElementById("bulk_domain").value;
   const difficulty = document.getElementById("bulk_difficulty").value;
   const type = document.getElementById("bulk_type").value;
+  const subType = document.getElementById("bulk_subType").value.trim();
   const source = document.getElementById("bulk_source").value.trim();
   const uInst = document.getElementById("bulk_usageInst").value.trim();
   const uWhen = document.getElementById("bulk_usageWhen").value.trim();
   const uGrade = document.getElementById("bulk_usageGrade").value.trim();
   const addUsage = uInst || uWhen || uGrade;
 
-  if(!domain && !difficulty && !type && !source && !addUsage){
+  if(!domain && !difficulty && !type && !subType && !source && !addUsage){
     document.getElementById("bulkResult").innerHTML = '<div class="dupBox"><b>변경할 항목을 하나 이상 입력해주세요.</b></div>';
     return;
   }
@@ -439,6 +447,7 @@ document.getElementById("applyBulk").addEventListener("click", async ()=>{
     if(domain) patch.domain = domain;
     if(difficulty) patch.difficulty = difficulty;
     if(type) patch.type = type;
+    if(subType) patch.subType = subType;
     if(source) patch.source = source;
     if(addUsage){
       const usageLog = (q.usageLog||[]).slice();
@@ -463,6 +472,7 @@ function resetSingleForm(){
   document.getElementById("f_domain").value="의사소통능력";
   document.getElementById("f_difficulty").value="미정";
   document.getElementById("f_type").value="미정";
+  document.getElementById("f_subType").value="";
   document.getElementById("f_imageLinkInput").value="";
   document.getElementById("f_imgPreview").innerHTML="";
   ["f_usageInst","f_usageWhen","f_usageGrade"].forEach(id=>document.getElementById(id).value="");
@@ -489,6 +499,7 @@ function openEditFor(id){
   document.getElementById("f_answer").value = q.answer||"";
   document.getElementById("f_difficulty").value = q.difficulty||"미정";
   document.getElementById("f_type").value = q.type||"미정";
+  document.getElementById("f_subType").value = q.subType||"";
   document.getElementById("f_imageLinkInput").value="";
   pendingImages = (q.images||[]).slice();
   renderImgPreview();
@@ -563,6 +574,7 @@ function readForm(){
     answer: document.getElementById("f_answer").value.trim(),
     difficulty: document.getElementById("f_difficulty").value,
     type: document.getElementById("f_type").value,
+    subType: document.getElementById("f_subType").value.trim(),
     images: pendingImages.slice(),
     usageLog: pendingUsage.slice()
   };
