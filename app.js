@@ -324,7 +324,8 @@ document.getElementById("bulkDeleteBtn").addEventListener("click", async ()=>{
 });
 
 // ---------- view toggle ----------
-document.getElementById("viewListBtn").addEventListener("click", ()=>{
+document.getElementById("viewListBtn").addEventListener("click", async ()=>{
+  await flushDetailEdits();
   document.getElementById("listView").style.display="block";
   document.getElementById("detailView").style.display="none";
   document.getElementById("viewListBtn").classList.add("active");
@@ -386,25 +387,56 @@ function renderDetail(){
   document.getElementById("versionTag").textContent = q.version&&q.version>1 ? ("v"+q.version+" · 이전 버전 "+(q.history?q.history.length:0)+"건 보관") : "";
   document.getElementById("prevBtn").disabled = detailIdx===0;
   document.getElementById("nextBtn").disabled = detailIdx===currentList.length-1;
+  setSaveStatus("", "");
 }
-document.getElementById("prevBtn").addEventListener("click", ()=>{ if(detailIdx>0){ detailIdx--; renderDetail(); } });
-document.getElementById("nextBtn").addEventListener("click", ()=>{ if(detailIdx<currentList.length-1){ detailIdx++; renderDetail(); } });
-document.getElementById("diffSelect").addEventListener("change", async(e)=>{
-  const id=currentList[detailIdx].id;
-  await updateDoc(doc(db, QUESTIONS_COL, id), { difficulty: e.target.value, updatedAt: Date.now() });
-});
-document.getElementById("typeSelect").addEventListener("change", async(e)=>{
-  const id=currentList[detailIdx].id;
-  await updateDoc(doc(db, QUESTIONS_COL, id), { type: e.target.value, updatedAt: Date.now() });
-});
-document.getElementById("subTypeInput").addEventListener("change", async(e)=>{
-  const id=currentList[detailIdx].id;
-  await updateDoc(doc(db, QUESTIONS_COL, id), { subType: e.target.value.trim(), updatedAt: Date.now() });
-});
-document.getElementById("answerInput").addEventListener("change", async(e)=>{
-  const id=currentList[detailIdx].id;
-  await updateDoc(doc(db, QUESTIONS_COL, id), { answer: e.target.value, updatedAt: Date.now() });
-});
+
+// ---- 상세보기 저장 (자동저장 + 저장 버튼 + 상태표시) ----
+function setSaveStatus(txt, kind){
+  const el = document.getElementById("detailSaveStatus");
+  if(!el) return;
+  el.textContent = txt || "";
+  el.style.color = kind==="ok" ? "var(--ok)" : (kind==="err" ? "var(--danger)" : "var(--muted)");
+}
+
+// 로컬 객체(currentList)를 먼저 갱신한 뒤 Firestore에 저장 → 다음/이전으로 넘어가도 저장한 값이 그대로 보임
+async function saveDetailPatch(patch){
+  const q = currentList[detailIdx];
+  if(!q) return;
+  Object.assign(q, patch);
+  setSaveStatus("저장 중…", "saving");
+  try{
+    await updateDoc(doc(db, QUESTIONS_COL, q.id), { ...patch, updatedAt: Date.now() });
+    setSaveStatus("저장됨 ✓", "ok");
+  }catch(err){
+    console.error(err);
+    setSaveStatus("저장 실패 — 다시 시도해주세요", "err");
+  }
+}
+
+// 입력칸 값 중 저장된 값과 다른 것만 저장 (다음/이전/목록으로 넘어가기 직전 호출)
+async function flushDetailEdits(){
+  if(document.getElementById("detailView").style.display === "none") return;
+  const q = currentList[detailIdx];
+  if(!q) return;
+  const patch = {};
+  const diff = document.getElementById("diffSelect").value;
+  const type = document.getElementById("typeSelect").value;
+  const subType = document.getElementById("subTypeInput").value.trim();
+  const answer = document.getElementById("answerInput").value.trim();
+  if(diff !== (q.difficulty||"미정")) patch.difficulty = diff;
+  if(type !== (q.type||"미정")) patch.type = type;
+  if(subType !== (q.subType||"")) patch.subType = subType;
+  if(answer !== (q.answer||"")) patch.answer = answer;
+  if(Object.keys(patch).length) await saveDetailPatch(patch);
+}
+
+document.getElementById("prevBtn").addEventListener("click", async ()=>{ if(detailIdx>0){ await flushDetailEdits(); detailIdx--; renderDetail(); } });
+document.getElementById("nextBtn").addEventListener("click", async ()=>{ if(detailIdx<currentList.length-1){ await flushDetailEdits(); detailIdx++; renderDetail(); } });
+document.getElementById("detailSaveBtn").addEventListener("click", async ()=>{ await flushDetailEdits(); setSaveStatus("저장됨 ✓", "ok"); });
+document.getElementById("diffSelect").addEventListener("change", (e)=> saveDetailPatch({ difficulty: e.target.value }));
+document.getElementById("typeSelect").addEventListener("change", (e)=> saveDetailPatch({ type: e.target.value }));
+document.getElementById("subTypeInput").addEventListener("change", (e)=> saveDetailPatch({ subType: e.target.value.trim() }));
+document.getElementById("answerInput").addEventListener("change", (e)=> saveDetailPatch({ answer: e.target.value.trim() }));
 
 // ---------- bulk edit modal ----------
 const overlayBulk = document.getElementById("overlayBulk");
