@@ -378,6 +378,7 @@ function renderDetail(){
   const chip = document.getElementById("domainChip");
   chip.textContent=q.domain; chip.style.color=col.c; chip.style.background=col.bg;
   document.getElementById("qid").textContent=q.id;
+  document.getElementById("domainSelect").value = q.domain;
   document.getElementById("qsource").textContent=q.source||"-";
   const usageBox = document.getElementById("qUsageList");
   const usage = q.usageLog||[];
@@ -433,7 +434,7 @@ function setDetailEditMode(on){
     stemEl.removeAttribute("readonly");
     passageEl.removeAttribute("readonly");
     choiceTAs.forEach(ta=>ta.removeAttribute("readonly"));
-    if(btn){ btn.textContent = "✓ 편집 완료"; btn.classList.remove("ghost"); btn.classList.add("primary"); }
+    if(btn){ btn.textContent = "✓ 편집 완료 (눌러서 저장)"; btn.classList.remove("outline"); btn.classList.add("primary"); }
     if(note) note.style.display = "inline-flex";
     if(maincard) maincard.classList.add("editing");
     stemEl.focus();
@@ -441,7 +442,7 @@ function setDetailEditMode(on){
     stemEl.setAttribute("readonly","");
     passageEl.setAttribute("readonly","");
     choiceTAs.forEach(ta=>ta.setAttribute("readonly",""));
-    if(btn){ btn.textContent = "✏️ 편집"; btn.classList.remove("primary"); btn.classList.add("ghost"); }
+    if(btn){ btn.textContent = "✏️ 편집하기"; btn.classList.remove("primary"); btn.classList.add("outline"); }
     if(note) note.style.display = "none";
     if(maincard) maincard.classList.remove("editing");
   }
@@ -476,6 +477,7 @@ async function flushDetailEdits(){
   const q = currentList[detailIdx];
   if(!q) return;
   const patch = {};
+  const domain = document.getElementById("domainSelect").value;
   const diff = document.getElementById("diffSelect").value;
   const type = document.getElementById("typeSelect").value;
   const subType = document.getElementById("subTypeInput").value.trim();
@@ -484,6 +486,7 @@ async function flushDetailEdits(){
   const passage = document.getElementById("passageBox").value.trim();
   const choices = Array.from(document.getElementById("choicesList").querySelectorAll("textarea"))
     .map(ta=>ta.value.trim());
+  if(domain !== q.domain) patch.domain = domain;
   if(diff !== (q.difficulty||"미정")) patch.difficulty = diff;
   if(type !== (q.type||"미정")) patch.type = type;
   if(subType !== (q.subType||"")) patch.subType = subType;
@@ -516,6 +519,13 @@ ensureDetailSaveUI();
 document.getElementById("prevBtn").addEventListener("click", async ()=>{ if(detailIdx>0){ await flushDetailEdits(); detailIdx--; renderDetail(); } });
 document.getElementById("nextBtn").addEventListener("click", async ()=>{ if(detailIdx<currentList.length-1){ await flushDetailEdits(); detailIdx++; renderDetail(); } });
 document.getElementById("detailSaveBtn").addEventListener("click", async ()=>{ await flushDetailEdits(); setSaveStatus("저장됨 ✓", "ok"); });
+document.getElementById("domainSelect").addEventListener("change", (e)=>{
+  const newDomain = e.target.value;
+  const col = DOMAIN_COLORS[newDomain]||{c:"var(--primary-2)",bg:"#eee"};
+  const chip = document.getElementById("domainChip");
+  chip.textContent = newDomain; chip.style.color = col.c; chip.style.background = col.bg;
+  saveDetailPatch({ domain: newDomain });
+});
 document.getElementById("diffSelect").addEventListener("change", (e)=> saveDetailPatch({ difficulty: e.target.value }));
 document.getElementById("typeSelect").addEventListener("change", (e)=> saveDetailPatch({ type: e.target.value }));
 document.getElementById("subTypeInput").addEventListener("change", (e)=> saveDetailPatch({ subType: e.target.value.trim() }));
@@ -935,7 +945,7 @@ dropZone.addEventListener("drop", (e)=>{
 
 // ---------- batch modal ----------
 const overlayBatch = document.getElementById("overlayBatch");
-const TEMPLATE = "[영역] 의사소통능력\n[출처] \n[문제] \n[지문] \n[보기]\n1) \n2) \n3) \n4) \n5) \n[정답] \n[난이도] 미정\n=====\n";
+const TEMPLATE = "[영역] 의사소통능력\n[출처] \n[유형] 미정\n[세부유형] \n[문제] \n[지문] \n[보기]\n1) \n2) \n3) \n4) \n5) \n[정답] \n[난이도] 미정\n=====\n";
 let batchMode = "auto"; // "auto" | "template"
 
 document.getElementById("openBatch").addEventListener("click", ()=>{
@@ -975,9 +985,9 @@ document.getElementById("modeTemplateBtn").addEventListener("click", ()=>{
 });
 
 function parseBlock(text){
-  const tagRe = /\[(영역|출처|문제|지문|보기|정답|난이도)\]/;
+  const tagRe = /\[(영역|출처|유형|세부유형|문제|지문|보기|정답|난이도)\]/;
   const lines = text.split("\n");
-  let cur = null; const data = {영역:"",출처:"",문제:"",지문:"",보기:"",정답:"",난이도:""};
+  let cur = null; const data = {영역:"",출처:"",유형:"",세부유형:"",문제:"",지문:"",보기:"",정답:"",난이도:""};
   lines.forEach(line=>{
     const m = line.match(tagRe);
     if(m && line.trim().startsWith("[")){
@@ -994,7 +1004,8 @@ function parseBlock(text){
   return {
     domain: data["영역"] || "의사소통능력",
     source: data["출처"], stem: data["문제"], passage: data["지문"],
-    choices, answer: data["정답"], difficulty: data["난이도"] || "미정"
+    choices, answer: data["정답"], difficulty: data["난이도"] || "미정",
+    type: data["유형"] || "미정", subType: data["세부유형"] || ""
   };
 }
 
@@ -1003,8 +1014,9 @@ function parseBlock(text){
 //  실제 보기에서만 쓰이는 동그라미 숫자만 문제 경계로 사용하므로 훨씬 안전함)
 // "의사소통능력 1~10번" 같은 영역 제목을 만나면 이후 문항의 영역을 자동 전환
 const NOISE_PATTERNS = [
-  /^직업기초능력평가$/, /^NCS\s*실전모의고사/, /^혼합형/, /^학교맞춤/, /^Copyright/i,
-  /^\(계속\s*\)$/, /^-\s*끝\s*-$/, /^문제의 답을 다시/, /^문항\s*수/, /^시험시간/, /^\d+\/\d+$/
+  /^직업기초능력평가$/, /NCS\s*실전모의고사/, /^혼합형/, /^학교맞춤/, /^Copyright/i,
+  /^\(계속\s*\)$/, /^\(\s*\)$/, /^-\s*끝\s*-$/, /^문제의 답을 다시/, /^문항\s*수/, /^시험시간/, /^\d+\/\d+$/,
+  /^:\s*\d+$/, /^&?PSAT$/i, /^이\s*름\s*점\s*수$/
 ];
 const DOMAIN_NAMES = Object.keys(DOMAIN_CODE);
 function detectDomainHeader(line){
@@ -1056,7 +1068,10 @@ function trySplitChoices(line, startIdx){
   return {newIdx: idx, texts};
 }
 
-function parseExamText(rawText, fallbackDomain, source){
+function parseExamText(rawText, fallbackDomain, source, fallbackType, fallbackSubType){
+  // 일부 파일(한글/워드에서 복사한 경우)은 표준 원문자(①②③④⑤) 대신 다른 유니코드
+  // 원문자(➀➁➂➃➄)를 쓰는 경우가 있어, 파싱 전에 표준 원문자로 통일한다.
+  rawText = rawText.replace(/➀/g,"①").replace(/➁/g,"②").replace(/➂/g,"③").replace(/➃/g,"④").replace(/➄/g,"⑤");
   const lines = rawText.split("\n").map(l=>l.replace(/\r$/,"").trim()).filter(l=>l);
   let currentDomain = fallbackDomain;
   const items = [];
@@ -1094,6 +1109,7 @@ function parseExamText(rawText, fallbackDomain, source){
         domain: currentDomain, source: source || "", stem, passage,
         choices: choices.map(c=>c.trim()).filter(Boolean),
         answer: "", difficulty: "미정",
+        type: fallbackType || "미정", subType: fallbackSubType || "",
         needsImage: detectNeedsImage(stem, passage)
       });
     }
@@ -1113,6 +1129,16 @@ function parseExamText(rawText, fallbackDomain, source){
       if(choicesComplete) finalizeQuestion();
       currentDomain = domHeader;
       return;
+    }
+
+    // 문서 맨 앞 안내문(예: "※ 다음은 NCS ... 입니다") 은 실제 문제가 아니므로,
+    // 아직 문제가 하나도 파싱 안 된 상태에서 "1." 로 시작하는 줄을 만나면
+    // 그 전까지 쌓인 안내문 텍스트는 버리고 진짜 1번 문제부터 새로 시작한다.
+    if(items.length===0 && choices.length===0){
+      const firstQMatch = trimmed.match(/^1[.\)]\s*\S/);
+      if(firstQMatch && numberOf(pending)===null){
+        pending = [];
+      }
     }
 
     // Same-page adjacent question (no page-break noise in between), e.g. paired 14-15 style questions:
@@ -1162,7 +1188,9 @@ document.getElementById("parseBatch").addEventListener("click", ()=>{
   if(batchMode === "auto"){
     const fallbackDomain = document.getElementById("batch_domain").value;
     const source = document.getElementById("batch_source").value.trim();
-    batchParsed = parseExamText(raw, fallbackDomain, source);
+    const fallbackType = document.getElementById("batch_type").value;
+    const fallbackSubType = document.getElementById("batch_subType").value.trim();
+    batchParsed = parseExamText(raw, fallbackDomain, source, fallbackType, fallbackSubType);
   } else {
     const blocks = raw.split(/^=+$/m).map(b=>b.trim()).filter(b=>b);
     batchParsed = blocks.map(parseBlock).filter(item=>item.stem);
@@ -1193,9 +1221,23 @@ document.getElementById("parseBatch").addEventListener("click", ()=>{
     const imgWarnBadge = item.needsImage
       ? '<span style="display:inline-block;background:var(--warn-bg);color:var(--warn);font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:999px;margin-left:6px;">🖼 이미지 첨부 필요</span>'
       : "";
+    const DOMAIN_OPTIONS = Object.keys(DOMAIN_CODE);
+    const TYPE_OPTIONS = ["미정","모듈","피듈","피셋","직무"];
     return '<div class="batchItem '+cls+'" data-idx="'+i+'">'+
-      '<div class="title">'+(i+1)+'. ['+item.domain+'] '+item.stem.slice(0,50)+imgWarnBadge+'</div>'+
+      '<div class="title">'+(i+1)+'. '+item.stem.slice(0,50)+imgWarnBadge+'</div>'+
       '<div class="status">'+statusText+'</div>'+
+      '<div style="margin-top:8px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;">'+
+        '<span style="font-size:11px;color:var(--muted);flex-shrink:0;">영역</span>'+
+        '<select data-domainidx="'+i+'" style="font-size:11.5px;padding:5px 8px;border:1px solid var(--line);border-radius:6px;">'+
+          DOMAIN_OPTIONS.map(d=>'<option'+(d===item.domain?' selected':'')+'>'+d+'</option>').join('')+
+        '</select>'+
+        '<span style="font-size:11px;color:var(--muted);flex-shrink:0;margin-left:4px;">유형</span>'+
+        '<select data-typeidx="'+i+'" style="font-size:11.5px;padding:5px 8px;border:1px solid var(--line);border-radius:6px;">'+
+          TYPE_OPTIONS.map(t=>'<option'+(t===(item.type||"미정")?' selected':'')+'>'+t+'</option>').join('')+
+        '</select>'+
+        '<span style="font-size:11px;color:var(--muted);flex-shrink:0;margin-left:4px;">세부유형</span>'+
+        '<input type="text" data-subtypeidx="'+i+'" value="'+(item.subType||"").replace(/"/g,'&quot;')+'" placeholder="예: 응용수리" style="flex:1;min-width:110px;font-size:11.5px;padding:5px 8px;border:1px solid var(--line);border-radius:6px;">'+
+      '</div>'+
       '<div style="margin-top:8px;display:flex;gap:6px;align-items:center;">'+
         '<span style="font-size:11px;color:'+(item.needsImage?'var(--warn)':'var(--muted)')+';flex-shrink:0;font-weight:'+(item.needsImage?'700':'400')+';">🖼 이미지 링크'+(item.needsImage?'(필요)':'(선택)')+'</span>'+
         '<input type="text" data-imgidx="'+i+'" placeholder="https://drive.google.com/file/d/..." style="flex:1;font-size:11.5px;padding:5px 8px;border:1px solid '+(item.needsImage?'var(--warn)':'var(--line)')+';border-radius:6px;">'+
@@ -1208,6 +1250,25 @@ document.getElementById("parseBatch").addEventListener("click", ()=>{
         '<button class="btn small ghost" data-batchact="force" data-idx="'+i+'">그래도 등록</button><button class="btn small ghost" data-batchact="skip" data-idx="'+i+'">건너뛰기 처리됨</button></div>' : "") +
       '</div>';
   }).join("");
+
+  resBox.querySelectorAll("select[data-domainidx]").forEach(sel=>{
+    sel.addEventListener("change", ()=>{
+      const idx = parseInt(sel.getAttribute("data-domainidx"),10);
+      batchParsed[idx].domain = sel.value;
+    });
+  });
+  resBox.querySelectorAll("select[data-typeidx]").forEach(sel=>{
+    sel.addEventListener("change", ()=>{
+      const idx = parseInt(sel.getAttribute("data-typeidx"),10);
+      batchParsed[idx].type = sel.value;
+    });
+  });
+  resBox.querySelectorAll("input[data-subtypeidx]").forEach(inp=>{
+    inp.addEventListener("change", ()=>{
+      const idx = parseInt(inp.getAttribute("data-subtypeidx"),10);
+      batchParsed[idx].subType = inp.value.trim();
+    });
+  });
 
   resBox.querySelectorAll("input[data-imgidx]").forEach(inp=>{
     inp.addEventListener("change", ()=>{
