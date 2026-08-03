@@ -19,8 +19,8 @@
 }
 *{box-sizing:border-box;}
 html,body{margin:0;padding:0;}
-body{font-family:'Pretendard',-apple-system,'Malgun Gothic',sans-serif;background:var(--bg);color:var(--ink);min-height:100vh;margin:0;padding:0;display:flex;flex-direction:column;align-items:stretch;}
-.app{width:calc(100% - 32px);max-width:1180px;margin:26px auto 50px;}
+body{font-family:'Pretendard',-apple-system,'Malgun Gothic',sans-serif;background:var(--bg);color:var(--ink);min-height:100vh;padding:26px 16px 50px;display:flex;flex-direction:column;align-items:center;}
+.app{width:100%;max-width:1180px;}
 .topline{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;flex-wrap:wrap;gap:12px;}
 .brand h1{font-size:16px;margin:0;color:var(--primary-2);}
 .brand .sub{font-size:11.5px;color:var(--muted);font-family:var(--mono);}
@@ -32,6 +32,10 @@ body{font-family:'Pretendard',-apple-system,'Malgun Gothic',sans-serif;backgroun
 .btn.ghost:hover{background:#E6E9F2;}
 .btn.small{padding:6px 10px;font-size:12px;border-radius:7px;}
 .btn.danger{background:var(--danger-bg);color:var(--danger);}
+.btn.outline{background:#fff;color:var(--ring);border:1.5px solid var(--ring);}
+.btn.outline:hover{background:var(--ok-bg);}
+#fileExtractStatus.filledNote{background:var(--ok-bg);color:#166B61;font-weight:700;border-radius:8px;padding:8px 10px;}
+.formrow input.justFilled{border-color:var(--ring) !important;background:#EAF6F5 !important;transition:background 2.5s ease, border-color 2.5s ease;}
 .userTag{font-size:11.5px;color:var(--muted);font-family:var(--mono);}
 
 .statrow{display:flex;gap:10px;flex-wrap:wrap;margin:16px 0 18px;}
@@ -150,22 +154,9 @@ table.qtable tr:hover td{background:#FAFBFD;}
 .loginCard input{width:100%;padding:10px 12px;margin-bottom:10px;border:1.5px solid var(--line);border-radius:8px;font-size:13.5px;font-family:inherit;}
 .loginCard .btn{width:100%;}
 #loginError{color:var(--danger);font-size:12px;margin-top:8px;min-height:16px;}
-  .gml-platform-bar{position:sticky;top:0;z-index:90;width:100%;min-height:64px;padding:0 max(20px,calc((100vw - 1120px)/2));display:flex;align-items:center;justify-content:space-between;gap:24px;background:rgba(255,255,255,.96);border-bottom:1px solid #e6ebf2;box-shadow:0 4px 18px rgba(20,34,61,.05);font-family:'Pretendard','Noto Sans KR',sans-serif}
-  .gml-platform-brand{display:flex;align-items:center;gap:10px;color:#14223d;text-decoration:none;font-size:15px;font-weight:700;white-space:nowrap}.gml-platform-brand b{color:#1769f2}.gml-platform-mark{width:32px;height:32px;display:grid;place-items:center;color:#fff;background:linear-gradient(145deg,#277cff,#0755da);border-radius:10px;font-weight:900;box-shadow:0 6px 16px rgba(23,105,242,.22)}
-  .gml-platform-nav{display:flex;align-items:center;gap:25px}.gml-platform-nav a{color:#657187;text-decoration:none;font-size:13px;font-weight:600}.gml-platform-nav a:hover,.gml-platform-nav a.active{color:#1769f2}.gml-platform-admin{padding:8px 12px;border:1px solid #e2e8f1;border-radius:9px;background:#fff}
-  @media(max-width:700px){.gml-platform-bar{min-height:58px;padding:0 14px}.gml-platform-brand{font-size:13px}.gml-platform-nav a{display:none}.gml-platform-nav a.active,.gml-platform-nav a.gml-platform-home{display:block}.gml-platform-nav{gap:14px}}
 </style>
 </head>
 <body>
-<div class="gml-platform-bar">
-  <a class="gml-platform-brand" href="https://gritmindlab.github.io/ncs-platform/"><span class="gml-platform-mark">G</span><span>그릿마인드랩 <b>NCS 플랫폼</b></span></a>
-  <nav class="gml-platform-nav" aria-label="통합 서비스 메뉴">
-    <a class="gml-platform-home" href="https://gritmindlab.github.io/ncs-platform/">홈</a>
-    <a href="https://gritmindlab.github.io/gritmindlab-cbt/">CBT 모의고사</a>
-    <a href="https://gritmindlab.github.io/gritmindlab-recruit/">채용달력</a>
-    <a class="gml-platform-admin active" href="https://gritmindlab.github.io/question-bank/">관리자</a>
-  </nav>
-</div>
 
 <div id="loginOverlay">
   <div class="loginCard">
@@ -221,6 +212,13 @@ table.qtable tr:hover td{background:#FAFBFD;}
     <div class="grid">
       <div class="sidecard">
         <span class="domain-chip" id="domainChip">영역</span>
+        <div class="field"><label>영역 (변경 가능)</label>
+          <select id="domainSelect">
+            <option>의사소통능력</option><option>수리능력</option><option>문제해결능력</option>
+            <option>자기개발능력</option><option>자원관리능력</option><option>대인관계능력</option>
+            <option>정보능력</option><option>기술능력</option><option>조직이해능력</option><option>직업윤리</option>
+          </select>
+        </div>
         <div class="field"><label>ID</label><div class="val" id="qid">-</div></div>
         <div class="field"><label>출처</label><div class="val" id="qsource" style="font-size:12px;">-</div></div>
         <div class="field"><label>사용 이력</label><div id="qUsageList" style="font-size:11.5px;color:var(--ink);line-height:1.6;">-</div></div>
@@ -237,7 +235,7 @@ table.qtable tr:hover td{background:#FAFBFD;}
           <div class="qnum" id="qnumLabel">문항 1 / 1</div>
           <div style="display:flex;align-items:center;gap:8px;">
             <span class="editModeNote" id="editModeNote">✏️ 편집 중 — 완료를 누르면 저장됩니다</span>
-            <button type="button" class="btn small ghost" id="detailEditToggle">✏️ 편집</button>
+            <button type="button" class="btn small outline" id="detailEditToggle">✏️ 편집</button>
           </div>
         </div>
         <textarea class="stem" id="stemText" rows="1" placeholder="문제(발문)를 입력하세요" readonly></textarea>
@@ -332,6 +330,11 @@ table.qtable tr:hover td{background:#FAFBFD;}
         </select>
       </div>
       <div class="formrow"><label>출처</label><input id="batch_source" placeholder="예: 한신대 2025 모의고사"></div>
+      <div class="formrow"><label>기본 유형 (문항마다 아래 미리보기에서 개별 수정 가능)</label>
+        <select id="batch_type"><option>미정</option><option>모듈</option><option>피듈</option><option>피셋</option><option>직무</option></select>
+      </div>
+      <div class="formrow"><label>기본 세부유형 (문항마다 아래 미리보기에서 개별 수정 가능)</label>
+        <input type="text" id="batch_subType" placeholder="예: 응용수리, 자료해석 등"></div>
     </div>
 
     <div class="formrow" style="margin-bottom:14px;">
