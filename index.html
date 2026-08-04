@@ -176,6 +176,7 @@ table.qtable tr:hover td{background:#FAFBFD;}
       <span class="userTag" id="userEmailTag"></span>
       <button class="btn ghost small" id="seedImportBtn">초기 데이터 가져오기</button>
       <button class="btn ghost" id="openBatch">일괄 붙여넣기</button>
+      <button class="btn ghost" id="openExplain">해설 일괄 입력</button>
       <button class="btn primary" id="openSingle">＋ 문제 추가</button>
       <button class="btn ghost small" id="logoutBtn">로그아웃</button>
     </div>
@@ -192,6 +193,7 @@ table.qtable tr:hover td{background:#FAFBFD;}
     <div class="toolbar">
       <input type="text" id="searchBox" placeholder="ID, 문제, 지문, 출처 검색...">
       <select id="domainFilter"></select>
+      <select id="sourceFilter"><option value="">출처(모의고사) 전체</option></select>
       <select id="diffFilter"><option value="">난이도 전체</option><option>하</option><option>중</option><option>상</option><option>미정</option></select>
       <select id="typeFilter"><option value="">유형 전체</option><option>모듈</option><option>피듈</option><option>피셋</option><option>직무</option><option>미정</option></select>
       <select id="imgNeedFilter"><option value="">이미지 전체</option><option value="needed">🖼 이미지 필요만</option></select>
@@ -226,6 +228,7 @@ table.qtable tr:hover td{background:#FAFBFD;}
         <div class="field"><label>유형</label><select id="typeSelect"><option>미정</option><option>모듈</option><option>피듈</option><option>피셋</option><option>직무</option></select></div>
         <div class="field"><label>세부유형</label><input id="subTypeInput" placeholder="직접 입력"></div>
         <div class="field"><label>정답</label><input id="answerInput" placeholder="예: 3" maxlength="1"></div>
+        <div class="field"><label>원문항번호 (해설 매칭용)</label><input type="number" id="examNumInput" placeholder="예: 1"></div>
         <button class="btn primary small" id="detailSaveBtn" style="width:100%;margin-top:4px;">저장</button>
         <div id="detailSaveStatus" style="font-size:11px;font-family:var(--mono);color:var(--muted);text-align:center;margin-top:6px;min-height:14px;"></div>
         <div class="versionTag" id="versionTag"></div>
@@ -242,6 +245,10 @@ table.qtable tr:hover td{background:#FAFBFD;}
         <div class="imgs" id="imgsBox"></div>
         <textarea class="passage" id="passageBox" rows="1" placeholder="지문/자료 없음 — 필요하면 여기에 입력해서 추가할 수 있어요" readonly></textarea>
         <ul class="choices" id="choicesList"></ul>
+        <div style="margin-top:18px;border-top:1px dashed var(--line);padding-top:14px;">
+          <label style="display:block;font-size:11px;color:var(--muted);font-weight:700;letter-spacing:.4px;text-transform:uppercase;margin-bottom:6px;">해설</label>
+          <textarea class="passage" id="explanationBox" rows="1" placeholder="해설 없음 — 편집 모드에서 입력하거나 '해설 일괄 입력'으로 한 번에 채울 수 있어요" readonly style="background:#FCFBF5;border-left-color:var(--warn);"></textarea>
+        </div>
       </div>
     </div>
     <div class="navbar">
@@ -362,6 +369,24 @@ table.qtable tr:hover td{background:#FAFBFD;}
     <div class="modalbtns" id="batchConfirmRow" style="display:none;">
       <button class="btn primary" id="registerAllOk">중복 없는 문항 전체 등록</button>
     </div>
+  </div>
+</div>
+
+<!-- 해설 일괄 입력 모달 -->
+<div class="overlay" id="overlayExplain">
+  <div class="modal wide">
+    <button type="button" class="modalCloseX" id="closeXExplain" aria-label="닫기">×</button>
+    <h2>해설 일괄 입력</h2>
+    <div class="modalsub">모의고사 하나를 고르고, 그 시험지의 해설(답안지) 텍스트를 통째로 붙여넣으면 문항번호로 자동 매칭해서 채워넣어요.<br>형식: 각 줄이 "1. 해설 내용..." 처럼 숫자로 시작하면 됩니다 (번호 뒤 여러 줄도 그 문항의 해설로 이어붙습니다).</div>
+    <div class="formrow"><label>출처(모의고사) 선택</label>
+      <select id="explain_source"></select>
+    </div>
+    <textarea class="batchArea" id="explainInput" style="min-height:260px;" placeholder="1. 정답은 ①이다. 왜냐하면...&#10;2. 정답은 ④이다...&#10;3. ..."></textarea>
+    <div class="modalbtns">
+      <button class="btn ghost" id="cancelExplain">취소</button>
+      <button class="btn primary" id="applyExplain">매칭해서 적용</button>
+    </div>
+    <div id="explainResult" style="margin-top:14px;"></div>
   </div>
 </div>
 
