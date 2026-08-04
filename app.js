@@ -159,7 +159,7 @@ async function deleteQuestion(id){
   await updateDoc(doc(db, QUESTIONS_COL, id), { deleted: true, updatedAt: Date.now() });
 }
 
-// "1. 해설내용...\n2. 해설내용..." 형식의 해설/답안지 텍스트를 문항번호별로 분리한다.
+// "1. 해설내용...\n2. 해설내용..." 형식의 해설 텍스트를 문항번호별로 분리한다.
 function parseExplanationText(rawText){
   const lines = (rawText||"").split("\n").map(l=>l.trim()).filter(l=>l);
   const result = {}; // { 문항번호: 해설텍스트 }
@@ -374,10 +374,8 @@ document.getElementById("bulkDeleteBtn").addEventListener("click", async ()=>{
   renderTable();
 });
 
-["searchBox","domainFilter","sourceFilter","diffFilter","typeFilter","imgNeedFilter"].forEach(id=>{
-  document.getElementById(id).addEventListener("input", renderTable);
-  document.getElementById(id).addEventListener("change", renderTable);
-});
+document.getElementById("searchApplyBtn").addEventListener("click", renderTable);
+document.getElementById("searchBox").addEventListener("keydown", (e)=>{ if(e.key==="Enter") renderTable(); });
 
 // ---------- view toggle ----------
 document.getElementById("viewListBtn").addEventListener("click", async ()=>{
