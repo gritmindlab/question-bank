@@ -1231,6 +1231,16 @@ function parseExamText(rawText, fallbackDomain, source, fallbackType, fallbackSu
       }
     }
 
+    // 법조문처럼 지문 안에 ①②③④⑤가 하위 조항 번호로 여러 번 나올 수 있다. 이미 보기를 모으는 중이거나
+    // 다 모은 상태에서 '①'이 다시 나타나면, 이전 것은 지문 내부의 오탐(하위 조항 번호)일 가능성이 높으므로
+    // 버리고 이 지점부터 새로 보기 수집을 시작한다. (실제 정답 보기는 항상 문제 맨 끝에서 ①부터 다시
+    // 시작하므로, 가장 마지막에 나오는 ①~⑤ 묶음을 취하는 것이 안전함)
+    if(trimmed.startsWith(CIRCLED_MARKS[0]) && (choicesComplete || expectingIdx>0)){
+      choices = [];
+      expectingIdx = 0;
+      choicesComplete = false;
+    }
+
     // Same-page adjacent question (no page-break noise in between), e.g. paired 14-15 style questions:
     // only trust a numbered line as a genuine new-question boundary if its number is exactly one more
     // than the question currently being accumulated (or, failing that, one more than the last finalized
