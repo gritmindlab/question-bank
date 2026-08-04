@@ -1051,6 +1051,52 @@ function detectNeedsImage(stem, passage){
   return false;
 }
 
+// 문항에 영역 표시가 전혀 없는 "혼합형" 시험지의 경우, 문제 내용 속 키워드/패턴을 보고
+// 어느 영역일지 1차로 추측해준다 (완벽하지 않으므로 미리보기에서 언제든 직접 수정 가능).
+function guessDomain(text, fallback){
+  const t = text || "";
+  const scores = {
+    "의사소통능력": 0, "수리능력": 0, "문제해결능력": 0, "자원관리능력": 0, "기술능력": 0,
+    "자기개발능력": 0, "대인관계능력": 0, "정보능력": 0, "조직이해능력": 0, "직업윤리": 0
+  };
+
+  [/다음\s*글을\s*읽고/, /일치하지\s*않는/, /일치하는\s*것은/, /제목으로\s*적절/, /경청/, /화법/,
+   /빈칸에\s*들어갈\s*단어/, /맞춤법/, /어법/, /문서작성/, /비즈니스\s*레터/, /공지사항/, /안내문/,
+   /논리적\s*오류/, /제목의/].forEach(re=>{ if(re.test(t)) scores["의사소통능력"] += 2; });
+
+  [/다음\s*빈칸에\s*들어갈\s*수/, /확률/, /평균/, /방정식/, /증가율/, /감소율/,
+   /소금물/, /농도/, /경우의\s*수/, /단위\s*:/, /표를\s*보고/, /자료에\s*대한/].forEach(re=>{ if(re.test(t)) scores["수리능력"] += 2; });
+  const qtyMatches = (t.match(/\d+\s*(%|원|명|시간|분|초|㎝|cm|㎏|kg|km|개|점|g|ℓ|㎖|ml|배|㎧)/g)||[]).length;
+  if(qtyMatches >= 4) scores["수리능력"] += 3;
+  else if(qtyMatches >= 2) scores["수리능력"] += 2;
+
+  [/<\s*조건/, /다음\s*조건/, /명제/, /창의적\s*사고/, /비판적\s*사고/, /논리적\s*사고/, /브레인스토밍/,
+   /SWOT/i, /3C\s*분석/, /순위를\s*매기/, /추론할\s*수\s*있는/, /유추할\s*수\s*있는/, /가설\s*설정/,
+   /이슈\s*분석/, /원인을\s*분석/, /항상\s*참인/, /반드시\s*옳지/, /조건에\s*따라/,
+   /문제해결/, /문제처리/].forEach(re=>{ if(re.test(t)) scores["문제해결능력"] += 2; });
+
+  [/예산/, /인력\s*배치/, /시간관리/, /물적자원/, /최소\s*비용/, /최단\s*시간/, /작업\s*지시서/,
+   /인력을\s*배치/].forEach(re=>{ if(re.test(t)) scores["자원관리능력"] += 2; });
+
+  [/매뉴얼/, /기술\s*적용/, /장비/, /설비/, /작동법/, /고장/, /점검/].forEach(re=>{ if(re.test(t)) scores["기술능력"] += 2; });
+
+  [/자기개발/, /경력개발/, /목표\s*설정/, /자아인식/].forEach(re=>{ if(re.test(t)) scores["자기개발능력"] += 2; });
+
+  [/갈등관리/, /리더십/, /협상/, /고객\s*서비스/, /팀워크/, /동기부여/].forEach(re=>{ if(re.test(t)) scores["대인관계능력"] += 2; });
+
+  [/엑셀/, /데이터베이스/, /정보\s*수집/, /컴퓨터활용/, /스프레드시트/, /함수식/].forEach(re=>{ if(re.test(t)) scores["정보능력"] += 2; });
+
+  [/조직도/, /경영전략/, /결재/, /조직구조/, /전결/, /품의서/].forEach(re=>{ if(re.test(t)) scores["조직이해능력"] += 2; });
+
+  [/직업윤리/, /준법/, /근면/, /봉사/, /책임의식/, /정직/].forEach(re=>{ if(re.test(t)) scores["직업윤리"] += 2; });
+
+  let best = null, bestScore = 0;
+  Object.keys(scores).forEach(d=>{
+    if(scores[d] > bestScore){ bestScore = scores[d]; best = d; }
+  });
+  return best || fallback;
+}
+
 function trySplitChoices(line, startIdx){
   const marks = CIRCLED_MARKS;
   if(!line.startsWith(marks[startIdx])) return null;
@@ -1074,6 +1120,7 @@ function parseExamText(rawText, fallbackDomain, source, fallbackType, fallbackSu
   rawText = rawText.replace(/➀/g,"①").replace(/➁/g,"②").replace(/➂/g,"③").replace(/➃/g,"④").replace(/➄/g,"⑤");
   const lines = rawText.split("\n").map(l=>l.replace(/\r$/,"").trim()).filter(l=>l);
   let currentDomain = fallbackDomain;
+  let anyDomainHeaderSeen = false;
   const items = [];
 
   let pending = [];       // lines accumulated for the current question's stem+passage (before its choices)
@@ -1084,6 +1131,12 @@ function parseExamText(rawText, fallbackDomain, source, fallbackType, fallbackSu
                           // same-page adjacent questions (e.g. paired 14-15 questions with no page break
                           // between them) without being fooled by numbered sub-clauses inside law/regulation
                           // passages that happen to increment the same way.
+
+  // "[47~48] 다음은 ... 답하시오" 처럼 여러 문제가 하나의 지문을 공유하는 묶음 형식을 위한 상태
+  let sharedPassage = "";      // 그룹이 공유하는 지문 텍스트
+  let sharedGroupStart = null; // 그룹의 첫 문제 번호 (예: 47)
+  let sharedGroupEnd = null;   // 그룹의 마지막 문제 번호 (예: 48)
+  let collectingSharedPassage = false; // 지금 공유 지문을 모으는 중인지
 
   function numberOf(lineList){
     for(const l of lineList){
@@ -1105,13 +1158,25 @@ function parseExamText(rawText, fallbackDomain, source, fallbackType, fallbackSu
         passage = bufText.slice(qIdx+1).trim();
       }
       stem = stem.replace(/^\d{1,3}[.\)]\s*/, "").trim(); // strip leading "N." question number
+      // 묶음형 문제(예: [47~48])라면, 공유 지문을 이 문제의 지문 앞에 붙인다
+      if(sharedGroupEnd!==null && sharedPassage){
+        passage = sharedPassage + (passage ? ("\n"+passage) : "");
+      }
+      // 문서 안에 영역 표시(헤더)가 한 번도 없었다면(=혼합형 시험지), 문항 내용을 보고 영역을 추측한다.
+      // 헤더가 있는 문서는 명시된 헤더 값을 그대로 신뢰한다.
+      const domain = anyDomainHeaderSeen ? currentDomain : guessDomain(stem+" "+passage, fallbackDomain);
       items.push({
-        domain: currentDomain, source: source || "", stem, passage,
+        domain, source: source || "", stem, passage,
         choices: choices.map(c=>c.trim()).filter(Boolean),
         answer: "", difficulty: "미정",
         type: fallbackType || "미정", subType: fallbackSubType || "",
-        needsImage: detectNeedsImage(stem, passage)
+        needsImage: detectNeedsImage(stem, passage),
+        _domainGuessed: !anyDomainHeaderSeen
       });
+      // 그룹의 마지막 문제까지 다 처리했으면 공유 지문 상태를 초기화한다
+      if(sharedGroupEnd!==null && foundNum!==null && foundNum>=sharedGroupEnd){
+        sharedGroupEnd = null; sharedGroupStart = null; sharedPassage = "";
+      }
     }
     pending = [];
     choices = [];
@@ -1128,7 +1193,32 @@ function parseExamText(rawText, fallbackDomain, source, fallbackType, fallbackSu
     if(domHeader){
       if(choicesComplete) finalizeQuestion();
       currentDomain = domHeader;
+      anyDomainHeaderSeen = true;
       return;
+    }
+
+    // 묶음형 지문 헤더 감지: 예) "[47~48] 다음은 ... 답하시오."
+    const groupMatch = trimmed.match(/^\[\s*(\d{1,3})\s*[~\-]\s*(\d{1,3})\s*\]\s*(.*)$/);
+    if(groupMatch){
+      if(choicesComplete) finalizeQuestion();
+      pending = []; choices = []; expectingIdx = 0; choicesComplete = false;
+      sharedGroupStart = parseInt(groupMatch[1],10);
+      sharedGroupEnd = parseInt(groupMatch[2],10);
+      collectingSharedPassage = true;
+      sharedPassage = groupMatch[3] ? groupMatch[3].trim() : "";
+      return;
+    }
+
+    // 공유 지문을 모으는 중이라면, 그룹의 시작 문제번호(예: "47.")를 만날 때까지 이 줄들을 지문으로 축적한다
+    if(collectingSharedPassage){
+      const startNumMatch = trimmed.match(/^(\d{1,3})[.\)]\s*\S/);
+      if(startNumMatch && parseInt(startNumMatch[1],10) === sharedGroupStart){
+        collectingSharedPassage = false;
+        // return하지 않고 아래 일반 로직으로 흘려보내 이 줄부터 문제 파싱을 시작하게 한다
+      } else {
+        sharedPassage += (sharedPassage?"\n":"") + trimmed;
+        return;
+      }
     }
 
     // 문서 맨 앞 안내문(예: "※ 다음은 NCS ... 입니다") 은 실제 문제가 아니므로,
@@ -1203,7 +1293,12 @@ document.getElementById("parseBatch").addEventListener("click", ()=>{
     return;
   }
 
-  resBox.innerHTML = batchParsed.map((item,i)=>{
+  const anyGuessed = batchParsed.some(item=>item._domainGuessed);
+  const guessNote = anyGuessed
+    ? '<div style="font-size:11.5px;color:var(--ring);background:var(--ok-bg);border-radius:8px;padding:8px 12px;margin-bottom:10px;">🔍 표시된 영역은 이 시험지에 영역 구분 표시가 없어서 문제 내용을 보고 추측한 값이에요. 틀린 항목은 아래에서 바로 고쳐주세요.</div>'
+    : '';
+
+  resBox.innerHTML = guessNote + batchParsed.map((item,i)=>{
     const newText = item.stem+" "+item.passage;
     let best={sim:0,q:null};
     allQuestions.forEach(q=>{ const sim=combinedSimilarity(newText, item.images, q); if(sim>best.sim) best={sim,q}; });
@@ -1227,7 +1322,7 @@ document.getElementById("parseBatch").addEventListener("click", ()=>{
       '<div class="title">'+(i+1)+'. '+item.stem.slice(0,50)+imgWarnBadge+'</div>'+
       '<div class="status">'+statusText+'</div>'+
       '<div style="margin-top:8px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;">'+
-        '<span style="font-size:11px;color:var(--muted);flex-shrink:0;">영역</span>'+
+        '<span style="font-size:11px;color:var(--muted);flex-shrink:0;">영역'+(item._domainGuessed?' 🔍':'')+'</span>'+
         '<select data-domainidx="'+i+'" style="font-size:11.5px;padding:5px 8px;border:1px solid var(--line);border-radius:6px;">'+
           DOMAIN_OPTIONS.map(d=>'<option'+(d===item.domain?' selected':'')+'>'+d+'</option>').join('')+
         '</select>'+
