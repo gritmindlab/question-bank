@@ -129,6 +129,8 @@ async function addNew(form){
     images: form.images||[], usageLog: form.usageLog||[],
     answer: form.answer, difficulty: form.difficulty, type: form.type || "미정", subType: form.subType || "",
     needsImage: !!form.needsImage,
+    examQuestionNumber: (form.examQuestionNumber===undefined ? null : form.examQuestionNumber),
+    explanation: form.explanation || "",
     version: 1, history: [], deleted: false,
     createdAt: Date.now(), updatedAt: Date.now()
   };
@@ -155,6 +157,31 @@ async function applyReplace(id, form){
 
 async function deleteQuestion(id){
   await updateDoc(doc(db, QUESTIONS_COL, id), { deleted: true, updatedAt: Date.now() });
+}
+
+// "1. 해설내용...\n2. 해설내용..." 형식의 해설/답안지 텍스트를 문항번호별로 분리한다.
+function parseExplanationText(rawText){
+  const lines = (rawText||"").split("\n").map(l=>l.trim()).filter(l=>l);
+  const result = {}; // { 문항번호: 해설텍스트 }
+  let curNum = null;
+  let curLines = [];
+  function flush(){
+    if(curNum!==null && curLines.length){
+      result[curNum] = curLines.join("\n").trim();
+    }
+  }
+  lines.forEach(line=>{
+    const m = line.match(/^(\d{1,3})[.\)]\s*(.*)$/);
+    if(m){
+      flush();
+      curNum = parseInt(m[1],10);
+      curLines = m[2] ? [m[2]] : [];
+    } else if(curNum!==null){
+      curLines.push(line);
+    }
+  });
+  flush();
+  return result;
 }
 
 // 일괄 붙여넣기에서 중복으로 판정된 문항을 새로 등록하는 대신, 기존 문항에 사용 이력만 덧붙일 때 사용
@@ -203,6 +230,13 @@ function renderStats(){
   domSel.innerHTML = '<option value="">영역 전체</option>' + Object.keys(DOMAIN_CODE).map(d=>'<option>'+d+'</option>').join('');
   domSel.value = cur;
 
+  // 출처(모의고사) 필터 드롭다운을 실제 존재하는 출처 값들로 채운다
+  const srcSel = document.getElementById("sourceFilter");
+  const curSrc = srcSel.value;
+  const distinctSources = [...new Set(allQuestions.map(q=>q.source).filter(Boolean))].sort();
+  srcSel.innerHTML = '<option value="">출처(모의고사) 전체</option>' + distinctSources.map(s=>'<option value="'+s.replace(/"/g,'&quot;')+'">'+s+'</option>').join('');
+  srcSel.value = curSrc;
+
   document.getElementById("statrow").querySelectorAll("button[data-statdom]").forEach(btn=>{
     btn.addEventListener("click", ()=>{
       const dom = btn.getAttribute("data-statdom");
@@ -224,15 +258,26 @@ function renderStats(){
 function getFiltered(){
   const q = document.getElementById("searchBox").value.trim().toLowerCase();
   const dom = document.getElementById("domainFilter").value;
+  const src = document.getElementById("sourceFilter").value;
   const diff = document.getElementById("diffFilter").value;
   const type = document.getElementById("typeFilter").value;
   const imgNeed = document.getElementById("imgNeedFilter").value;
   let list = allQuestions.slice();
   if(dom) list = list.filter(x=>x.domain===dom);
+  if(src) list = list.filter(x=>x.source===src);
   if(diff) list = list.filter(x=>(x.difficulty||"미정")===diff);
   if(type) list = list.filter(x=>(x.type||"미정")===type);
   if(imgNeed==="needed") list = list.filter(x=>x.needsImage && (x.images||[]).length===0);
   if(q) list = list.filter(x => (x.id+" "+x.stem+" "+(x.passage||"")+" "+(x.source||"")+" "+(x.type||"")+" "+(x.subType||"")).toLowerCase().includes(q));
+  // 출처(모의고사)로 좁혀서 볼 때는, 원본 시험지의 문항번호 순서(1,2,3...)대로 보이게 정렬해서
+  // 답안지/해설과 나란히 맞춰볼 수 있게 한다. 원문항번호가 없는 문항은 뒤로 보낸다.
+  if(src){
+    list.sort((a,b)=>{
+      const na = a.examQuestionNumber!=null ? a.examQuestionNumber : Infinity;
+      const nb = b.examQuestionNumber!=null ? b.examQuestionNumber : Infinity;
+      return na - nb;
+    });
+  }
   return list;
 }
 
@@ -329,7 +374,7 @@ document.getElementById("bulkDeleteBtn").addEventListener("click", async ()=>{
   renderTable();
 });
 
-["searchBox","domainFilter","diffFilter","typeFilter","imgNeedFilter"].forEach(id=>{
+["searchBox","domainFilter","sourceFilter","diffFilter","typeFilter","imgNeedFilter"].forEach(id=>{
   document.getElementById(id).addEventListener("input", renderTable);
   document.getElementById(id).addEventListener("change", renderTable);
 });
@@ -398,6 +443,9 @@ function renderDetail(){
   const passageBox = document.getElementById("passageBox");
   passageBox.value = q.passage||"";
   autoResize(passageBox);
+  const explanationBox = document.getElementById("explanationBox");
+  explanationBox.value = q.explanation||"";
+  autoResize(explanationBox);
   const list = document.getElementById("choicesList"); list.innerHTML="";
   const marks=['①','②','③','④','⑤'];
   (q.choices||[]).forEach((c,i)=>{
@@ -412,6 +460,7 @@ function renderDetail(){
   document.getElementById("typeSelect").value = q.type||"미정";
   document.getElementById("subTypeInput").value = q.subType||"";
   document.getElementById("answerInput").value = q.answer||"";
+  document.getElementById("examNumInput").value = (q.examQuestionNumber!=null ? q.examQuestionNumber : "");
   document.getElementById("versionTag").textContent = q.version&&q.version>1 ? ("v"+q.version+" · 이전 버전 "+(q.history?q.history.length:0)+"건 보관") : "";
   document.getElementById("prevBtn").disabled = detailIdx===0;
   document.getElementById("nextBtn").disabled = detailIdx===currentList.length-1;
@@ -426,6 +475,7 @@ function setDetailEditMode(on){
   detailEditMode = on;
   const stemEl = document.getElementById("stemText");
   const passageEl = document.getElementById("passageBox");
+  const explanationEl = document.getElementById("explanationBox");
   const choiceTAs = document.getElementById("choicesList").querySelectorAll("textarea");
   const btn = document.getElementById("detailEditToggle");
   const note = document.getElementById("editModeNote");
@@ -433,6 +483,7 @@ function setDetailEditMode(on){
   if(on){
     stemEl.removeAttribute("readonly");
     passageEl.removeAttribute("readonly");
+    explanationEl.removeAttribute("readonly");
     choiceTAs.forEach(ta=>ta.removeAttribute("readonly"));
     if(btn){ btn.textContent = "✓ 편집 완료 (눌러서 저장)"; btn.classList.remove("outline"); btn.classList.add("primary"); }
     if(note) note.style.display = "inline-flex";
@@ -441,6 +492,7 @@ function setDetailEditMode(on){
   } else {
     stemEl.setAttribute("readonly","");
     passageEl.setAttribute("readonly","");
+    explanationEl.setAttribute("readonly","");
     choiceTAs.forEach(ta=>ta.setAttribute("readonly",""));
     if(btn){ btn.textContent = "✏️ 편집하기"; btn.classList.remove("primary"); btn.classList.add("outline"); }
     if(note) note.style.display = "none";
@@ -482,8 +534,11 @@ async function flushDetailEdits(){
   const type = document.getElementById("typeSelect").value;
   const subType = document.getElementById("subTypeInput").value.trim();
   const answer = document.getElementById("answerInput").value.trim();
+  const examNumRaw = document.getElementById("examNumInput").value.trim();
+  const examNum = examNumRaw ? parseInt(examNumRaw,10) : null;
   const stem = document.getElementById("stemText").value.trim();
   const passage = document.getElementById("passageBox").value.trim();
+  const explanation = document.getElementById("explanationBox").value.trim();
   const choices = Array.from(document.getElementById("choicesList").querySelectorAll("textarea"))
     .map(ta=>ta.value.trim());
   if(domain !== q.domain) patch.domain = domain;
@@ -491,8 +546,10 @@ async function flushDetailEdits(){
   if(type !== (q.type||"미정")) patch.type = type;
   if(subType !== (q.subType||"")) patch.subType = subType;
   if(answer !== (q.answer||"")) patch.answer = answer;
+  if(examNum !== (q.examQuestionNumber!=null ? q.examQuestionNumber : null)) patch.examQuestionNumber = examNum;
   if(stem !== (q.stem||"")) patch.stem = stem;
   if(passage !== (q.passage||"")) patch.passage = passage;
+  if(explanation !== (q.explanation||"")) patch.explanation = explanation;
   if(choices.length && JSON.stringify(choices) !== JSON.stringify(q.choices||[])) patch.choices = choices;
   if(Object.keys(patch).length) await saveDetailPatch(patch);
 }
@@ -530,6 +587,10 @@ document.getElementById("diffSelect").addEventListener("change", (e)=> saveDetai
 document.getElementById("typeSelect").addEventListener("change", (e)=> saveDetailPatch({ type: e.target.value }));
 document.getElementById("subTypeInput").addEventListener("change", (e)=> saveDetailPatch({ subType: e.target.value.trim() }));
 document.getElementById("answerInput").addEventListener("change", (e)=> saveDetailPatch({ answer: e.target.value.trim() }));
+document.getElementById("examNumInput").addEventListener("change", (e)=>{
+  const v = e.target.value.trim();
+  saveDetailPatch({ examQuestionNumber: v ? parseInt(v,10) : null });
+});
 
 // 발문(문제) 직접 수정 — 입력할 때마다 높이 자동조절, 포커스를 벗어나면(change) 저장
 document.getElementById("stemText").addEventListener("input", (e)=> autoResize(e.target));
@@ -538,6 +599,10 @@ document.getElementById("stemText").addEventListener("change", (e)=> saveDetailP
 // 지문/자료 직접 수정 (비어 있던 문항에 새로 지문을 추가하는 것도 가능)
 document.getElementById("passageBox").addEventListener("input", (e)=> autoResize(e.target));
 document.getElementById("passageBox").addEventListener("change", (e)=> saveDetailPatch({ passage: e.target.value.trim() }));
+
+// 해설 직접 수정
+document.getElementById("explanationBox").addEventListener("input", (e)=> autoResize(e.target));
+document.getElementById("explanationBox").addEventListener("change", (e)=> saveDetailPatch({ explanation: e.target.value.trim() }));
 
 // 보기(①~⑤) 직접 수정 — textarea들이 detail 렌더링마다 새로 생성되므로 목록(ul)에 이벤트 위임
 document.getElementById("choicesList").addEventListener("input", (e)=>{
@@ -616,6 +681,50 @@ document.getElementById("applyBulk").addEventListener("click", async ()=>{
   }
   document.getElementById("bulkResult").innerHTML = '<div class="okBox">✓ '+count+'개 문항이 일괄 수정되었습니다.</div>';
   setTimeout(()=>{ overlayBulk.classList.remove("open"); selectedIds.clear(); renderTable(); }, 900);
+});
+
+// ---------- 해설 일괄 입력 모달 ----------
+const overlayExplain = document.getElementById("overlayExplain");
+document.getElementById("openExplain").addEventListener("click", ()=>{
+  const distinctSources = [...new Set(allQuestions.map(q=>q.source).filter(Boolean))].sort();
+  const sel = document.getElementById("explain_source");
+  const curFilterSrc = document.getElementById("sourceFilter").value; // 목록에서 이미 출처를 골라뒀다면 기본 선택으로
+  sel.innerHTML = distinctSources.map(s=>'<option'+(s===curFilterSrc?' selected':'')+'>'+s+'</option>').join('');
+  document.getElementById("explainInput").value = "";
+  document.getElementById("explainResult").innerHTML = "";
+  overlayExplain.classList.add("open");
+});
+document.getElementById("cancelExplain").addEventListener("click", ()=>overlayExplain.classList.remove("open"));
+document.getElementById("closeXExplain").addEventListener("click", ()=>overlayExplain.classList.remove("open"));
+overlayExplain.addEventListener("click", e=>{ if(e.target===overlayExplain) overlayExplain.classList.remove("open"); });
+
+document.getElementById("applyExplain").addEventListener("click", async ()=>{
+  const source = document.getElementById("explain_source").value;
+  const raw = document.getElementById("explainInput").value;
+  const resBox = document.getElementById("explainResult");
+  if(!source){ resBox.innerHTML = '<div class="dupBox"><b>출처(모의고사)를 선택해주세요.</b></div>'; return; }
+  const parsed = parseExplanationText(raw);
+  const numbers = Object.keys(parsed).map(n=>parseInt(n,10));
+  if(numbers.length===0){ resBox.innerHTML = '<div class="dupBox"><b>인식된 해설이 없습니다.</b> "1. 해설내용" 형식으로 붙여넣어 주세요.</div>'; return; }
+
+  const targets = allQuestions.filter(q=>q.source===source);
+  let matched = 0;
+  const unmatchedNums = [];
+  for(const num of numbers){
+    const q = targets.find(x=>x.examQuestionNumber===num);
+    if(!q){ unmatchedNums.push(num); continue; }
+    await updateDoc(doc(db, QUESTIONS_COL, q.id), { explanation: parsed[num], updatedAt: Date.now() });
+    matched++;
+  }
+  const noNumTargets = targets.filter(q=>q.examQuestionNumber==null).length;
+  let html = '<div class="okBox">✓ '+matched+'개 문항에 해설이 적용되었습니다.</div>';
+  if(unmatchedNums.length){
+    html += '<div class="dupBox" style="margin-top:8px;"><b>매칭 안 된 번호: '+unmatchedNums.join(', ')+'</b><br>해당 번호의 문항을 이 출처에서 찾지 못했어요. 상세보기에서 "원문항번호"가 제대로 들어가 있는지 확인해주세요.</div>';
+  }
+  if(noNumTargets>0){
+    html += '<div style="font-size:11.5px;color:var(--muted);margin-top:8px;">참고: 이 출처의 문항 중 '+noNumTargets+'개는 원문항번호가 비어있어 매칭 대상에서 제외됐어요.</div>';
+  }
+  resBox.innerHTML = html;
 });
 
 // ---------- single add/edit modal ----------
@@ -1171,6 +1280,7 @@ function parseExamText(rawText, fallbackDomain, source, fallbackType, fallbackSu
         answer: "", difficulty: "미정",
         type: fallbackType || "미정", subType: fallbackSubType || "",
         needsImage: detectNeedsImage(stem, passage),
+        examQuestionNumber: foundNum, // 원본 시험지에서의 문항번호 (해설 매칭용)
         _domainGuessed: !anyDomainHeaderSeen
       });
       // 그룹의 마지막 문제까지 다 처리했으면 공유 지문 상태를 초기화한다
@@ -1342,6 +1452,8 @@ document.getElementById("parseBatch").addEventListener("click", ()=>{
         '</select>'+
         '<span style="font-size:11px;color:var(--muted);flex-shrink:0;margin-left:4px;">세부유형</span>'+
         '<input type="text" data-subtypeidx="'+i+'" value="'+(item.subType||"").replace(/"/g,'&quot;')+'" placeholder="예: 응용수리" style="flex:1;min-width:110px;font-size:11.5px;padding:5px 8px;border:1px solid var(--line);border-radius:6px;">'+
+        '<span style="font-size:11px;color:var(--muted);flex-shrink:0;margin-left:4px;">원문항번호</span>'+
+        '<input type="number" data-qnumidx="'+i+'" value="'+(item.examQuestionNumber!=null?item.examQuestionNumber:"")+'" placeholder="예: 1" style="width:64px;font-size:11.5px;padding:5px 8px;border:1px solid var(--line);border-radius:6px;">'+
       '</div>'+
       '<div style="margin-top:8px;display:flex;gap:6px;align-items:center;">'+
         '<span style="font-size:11px;color:'+(item.needsImage?'var(--warn)':'var(--muted)')+';flex-shrink:0;font-weight:'+(item.needsImage?'700':'400')+';">🖼 이미지 링크'+(item.needsImage?'(필요)':'(선택)')+'</span>'+
@@ -1372,6 +1484,13 @@ document.getElementById("parseBatch").addEventListener("click", ()=>{
     inp.addEventListener("change", ()=>{
       const idx = parseInt(inp.getAttribute("data-subtypeidx"),10);
       batchParsed[idx].subType = inp.value.trim();
+    });
+  });
+  resBox.querySelectorAll("input[data-qnumidx]").forEach(inp=>{
+    inp.addEventListener("change", ()=>{
+      const idx = parseInt(inp.getAttribute("data-qnumidx"),10);
+      const v = inp.value.trim();
+      batchParsed[idx].examQuestionNumber = v ? parseInt(v,10) : null;
     });
   });
 
@@ -1427,7 +1546,7 @@ document.getElementById("registerAllOk").addEventListener("click", async ()=>{
     if(item._skip) continue; // 사용이력만 추가 처리된 항목, 또는 건너뛰기 처리된 항목은 새로 등록하지 않음
     if(item._dup && !item._forceAdd) continue;
     const hasImage = (item.images||[]).length > 0;
-    await addNew({domain:item.domain, source:item.source, stem:item.stem, passage:item.passage, choices:item.choices, answer:item.answer, difficulty:item.difficulty, images:item.images||[], usageLog: commonUsageLog, needsImage: item.needsImage && !hasImage});
+    await addNew({domain:item.domain, source:item.source, stem:item.stem, passage:item.passage, choices:item.choices, answer:item.answer, difficulty:item.difficulty, type:item.type||"미정", subType:item.subType||"", images:item.images||[], usageLog: commonUsageLog, needsImage: item.needsImage && !hasImage, examQuestionNumber: (item.examQuestionNumber!==undefined ? item.examQuestionNumber : null)});
     count++;
   }
   document.getElementById("batchResult").innerHTML += '<div class="okBox">✓ 총 '+count+'개 문항이 등록되었습니다.</div>';
