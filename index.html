@@ -20,7 +20,7 @@
 *{box-sizing:border-box;}
 html,body{margin:0;padding:0;}
 body{font-family:'Pretendard',-apple-system,'Malgun Gothic',sans-serif;background:var(--bg);color:var(--ink);min-height:100vh;padding:26px 16px 50px;display:flex;flex-direction:column;align-items:center;}
-.app{width:100%;max-width:1480px;}
+.app{width:100%;max-width:1180px;}
 .topline{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;flex-wrap:wrap;gap:12px;}
 .brand h1{font-size:16px;margin:0;color:var(--primary-2);}
 .brand .sub{font-size:11.5px;color:var(--muted);font-family:var(--mono);}
@@ -32,10 +32,6 @@ body{font-family:'Pretendard',-apple-system,'Malgun Gothic',sans-serif;backgroun
 .btn.ghost:hover{background:#E6E9F2;}
 .btn.small{padding:6px 10px;font-size:12px;border-radius:7px;}
 .btn.danger{background:var(--danger-bg);color:var(--danger);}
-.btn.outline{background:#fff;color:var(--ring);border:1.5px solid var(--ring);}
-.btn.outline:hover{background:var(--ok-bg);}
-#fileExtractStatus.filledNote{background:var(--ok-bg);color:#166B61;font-weight:700;border-radius:8px;padding:8px 10px;}
-.formrow input.justFilled{border-color:var(--ring) !important;background:#EAF6F5 !important;transition:background 2.5s ease, border-color 2.5s ease;}
 .userTag{font-size:11.5px;color:var(--muted);font-family:var(--mono);}
 
 .statrow{display:flex;gap:10px;flex-wrap:wrap;margin:16px 0 18px;}
@@ -75,40 +71,20 @@ table.qtable tr:hover td{background:#FAFBFD;}
 .field select,.field input{width:100%;font-family:var(--mono);font-size:14px;font-weight:600;border:1.5px solid var(--line);border-radius:8px;padding:7px 8px;background:#fbfcfe;}
 .versionTag{font-size:10.5px;color:var(--muted);font-family:var(--mono);margin-top:2px;}
 .maincard{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:28px 32px;min-height:380px;}
-.qnumRow{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;gap:10px;}
-.qnum{font-family:var(--mono);font-size:12px;color:var(--muted);}
-.editModeNote{font-size:11px;color:var(--ring);font-weight:700;display:none;align-items:center;gap:5px;}
-
-/* 상세보기 편집: 기본은 읽기전용, "편집" 버튼을 눌러야 발문/지문/보기 수정 가능 */
-.stem{
-  display:block;width:100%;font-family:inherit;font-size:17px;font-weight:700;line-height:1.55;
-  margin-bottom:14px;border:1.5px solid transparent;border-radius:8px;padding:8px 10px;margin-left:-10px;
-  background:transparent;resize:none;overflow:hidden;color:var(--ink);cursor:default;
-}
+.qnum{font-family:var(--mono);font-size:12px;color:var(--muted);margin-bottom:10px;}
+.stem{font-size:17px;font-weight:700;line-height:1.55;margin-bottom:14px;}
 .imgs{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;}
 .imgs img{max-width:260px;max-height:200px;border-radius:8px;border:1px solid var(--line);object-fit:contain;}
-.passage{
-  display:block;width:100%;font-family:inherit;background:#F7F8FB;border-left:3px solid var(--line);
-  border-top:1.5px solid transparent;border-right:1.5px solid transparent;border-bottom:1.5px solid transparent;
-  border-radius:8px;padding:16px 18px;font-size:13.5px;line-height:1.75;white-space:pre-wrap;color:#333B4D;
-  margin-bottom:20px;resize:none;overflow:hidden;min-height:48px;cursor:default;
-}
-.passage::placeholder{color:var(--muted);font-family:'Pretendard',sans-serif;}
+.passage{background:#F7F8FB;border-left:3px solid var(--line);border-radius:8px;padding:16px 18px;font-size:13.5px;line-height:1.75;white-space:pre-wrap;color:#333B4D;margin-bottom:20px;max-height:240px;overflow-y:auto;}
+.dataTitle{font-size:12px;font-weight:700;color:var(--muted);margin-bottom:8px;}
+table.dataTable{border-collapse:collapse;width:100%;font-size:12.5px;margin-bottom:4px;}
+table.dataTable th,table.dataTable td{border:1px solid var(--line);padding:6px 10px;text-align:center;}
+table.dataTable th{background:#F7F9FC;font-weight:700;color:var(--ink);}
+table.dataTable td{color:#333B4D;}
+.chartWrap{max-width:520px;background:#F7F8FB;border-radius:8px;padding:14px;}
 .choices{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:9px;}
-.choices li{display:flex;gap:10px;align-items:flex-start;font-size:14.5px;line-height:1.55;padding:7px 8px 7px 14px;border:1.5px solid var(--line);border-radius:10px;}
-.cnum{font-family:var(--mono);font-weight:700;color:var(--ring);flex-shrink:0;padding-top:6px;}
-.choices li textarea{
-  flex:1;width:100%;font-family:inherit;font-size:14.5px;line-height:1.55;color:var(--ink);
-  border:1.5px solid transparent;border-radius:7px;padding:6px 8px;background:transparent;resize:none;overflow:hidden;cursor:default;
-}
-/* 편집 모드일 때만(readonly가 풀렸을 때만) 입력 가능한 느낌을 준다 */
-.stem:not([readonly]),.passage:not([readonly]),.choices li textarea:not([readonly]){cursor:text;}
-.stem:not([readonly]):hover,.choices li textarea:not([readonly]):hover{background:#FAFBFD;}
-.passage:not([readonly]):hover{background:#F1F3F9;}
-.stem:not([readonly]):focus,.passage:not([readonly]):focus,.choices li textarea:not([readonly]):focus{
-  outline:none;border-color:var(--ring);background:#fff;box-shadow:0 0 0 3px rgba(47,111,109,.10);
-}
-.editing .maincard{border-color:var(--ring);box-shadow:0 0 0 3px rgba(47,111,109,.08);}
+.choices li{display:flex;gap:10px;font-size:14.5px;line-height:1.55;padding:11px 14px;border:1.5px solid var(--line);border-radius:10px;}
+.cnum{font-family:var(--mono);font-weight:700;color:var(--ring);flex-shrink:0;}
 .navbar{display:flex;align-items:center;justify-content:center;gap:22px;margin-top:22px;}
 .navbtn{width:42px;height:42px;border-radius:50%;border:1.5px solid var(--line);background:var(--card);cursor:pointer;display:flex;align-items:center;justify-content:center;}
 .navbtn:hover:not(:disabled){background:var(--primary-2);color:#fff;}
@@ -176,7 +152,6 @@ table.qtable tr:hover td{background:#FAFBFD;}
       <span class="userTag" id="userEmailTag"></span>
       <button class="btn ghost small" id="seedImportBtn">초기 데이터 가져오기</button>
       <button class="btn ghost" id="openBatch">일괄 붙여넣기</button>
-      <button class="btn ghost" id="openExplain">해설 일괄 입력</button>
       <button class="btn primary" id="openSingle">＋ 문제 추가</button>
       <button class="btn ghost small" id="logoutBtn">로그아웃</button>
     </div>
@@ -193,11 +168,8 @@ table.qtable tr:hover td{background:#FAFBFD;}
     <div class="toolbar">
       <input type="text" id="searchBox" placeholder="ID, 문제, 지문, 출처 검색...">
       <select id="domainFilter"></select>
-      <select id="sourceFilter"><option value="">출처(모의고사) 전체</option></select>
       <select id="diffFilter"><option value="">난이도 전체</option><option>하</option><option>중</option><option>상</option><option>미정</option></select>
-      <select id="typeFilter"><option value="">유형 전체</option><option>모듈</option><option>피듈</option><option>피셋</option><option>직무</option><option>미정</option></select>
       <select id="imgNeedFilter"><option value="">이미지 전체</option><option value="needed">🖼 이미지 필요만</option></select>
-      <button class="btn primary small" id="searchApplyBtn">검색</button>
     </div>
     <div id="bulkBar" style="display:none;align-items:center;gap:10px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 14px;margin-bottom:10px;">
       <span style="font-size:12.5px;font-weight:700;"><span id="bulkCount">0</span>개 선택됨</span>
@@ -206,7 +178,7 @@ table.qtable tr:hover td{background:#FAFBFD;}
       <button class="btn small ghost" id="bulkClearBtn">선택 해제</button>
     </div>
     <table class="qtable">
-      <thead><tr><th style="width:28px;"><input type="checkbox" id="selectAllBox"></th><th>ID</th><th>영역</th><th>유형</th><th>세부유형</th><th>문제</th><th>난이도</th><th>정답</th><th>출처</th><th>사용기관</th><th>이미지</th><th></th></tr></thead>
+      <thead><tr><th style="width:28px;"><input type="checkbox" id="selectAllBox"></th><th>ID</th><th>영역</th><th>문제</th><th>난이도</th><th>정답</th><th>출처</th><th>사용기관</th><th>이미지</th><th></th></tr></thead>
       <tbody id="tbody"></tbody>
     </table>
   </div>
@@ -215,41 +187,20 @@ table.qtable tr:hover td{background:#FAFBFD;}
     <div class="grid">
       <div class="sidecard">
         <span class="domain-chip" id="domainChip">영역</span>
-        <div class="field"><label>영역 (변경 가능)</label>
-          <select id="domainSelect">
-            <option>의사소통능력</option><option>수리능력</option><option>문제해결능력</option>
-            <option>자기개발능력</option><option>자원관리능력</option><option>대인관계능력</option>
-            <option>정보능력</option><option>기술능력</option><option>조직이해능력</option><option>직업윤리</option>
-          </select>
-        </div>
         <div class="field"><label>ID</label><div class="val" id="qid">-</div></div>
         <div class="field"><label>출처</label><div class="val" id="qsource" style="font-size:12px;">-</div></div>
         <div class="field"><label>사용 이력</label><div id="qUsageList" style="font-size:11.5px;color:var(--ink);line-height:1.6;">-</div></div>
         <div class="field"><label>난이도</label><select id="diffSelect"><option>미정</option><option>하</option><option>중</option><option>상</option></select></div>
-        <div class="field"><label>유형</label><select id="typeSelect"><option>미정</option><option>모듈</option><option>피듈</option><option>피셋</option><option>직무</option></select></div>
-        <div class="field"><label>세부유형</label><input id="subTypeInput" placeholder="직접 입력"></div>
         <div class="field"><label>정답</label><input id="answerInput" placeholder="예: 3" maxlength="1"></div>
-        <div class="field"><label>원문항번호 (해설 매칭용)</label><input type="number" id="examNumInput" placeholder="예: 1"></div>
-        <button class="btn primary small" id="detailSaveBtn" style="width:100%;margin-top:4px;">저장</button>
-        <div id="detailSaveStatus" style="font-size:11px;font-family:var(--mono);color:var(--muted);text-align:center;margin-top:6px;min-height:14px;"></div>
         <div class="versionTag" id="versionTag"></div>
       </div>
-      <div class="maincard" id="maincard">
-        <div class="qnumRow">
-          <div class="qnum" id="qnumLabel">문항 1 / 1</div>
-          <div style="display:flex;align-items:center;gap:8px;">
-            <span class="editModeNote" id="editModeNote">✏️ 편집 중 — 완료를 누르면 저장됩니다</span>
-            <button type="button" class="btn small outline" id="detailEditToggle">✏️ 편집</button>
-          </div>
-        </div>
-        <textarea class="stem" id="stemText" rows="1" placeholder="문제(발문)를 입력하세요" readonly></textarea>
+      <div class="maincard">
+        <div class="qnum" id="qnumLabel">문항 1 / 1</div>
+        <div class="stem" id="stemText"></div>
         <div class="imgs" id="imgsBox"></div>
-        <textarea class="passage" id="passageBox" rows="1" placeholder="지문/자료 없음 — 필요하면 여기에 입력해서 추가할 수 있어요" readonly></textarea>
+        <div id="chartBox" style="margin-bottom:16px;"></div>
+        <div class="passage" id="passageBox" style="display:none;"></div>
         <ul class="choices" id="choicesList"></ul>
-        <div style="margin-top:18px;border-top:1px dashed var(--line);padding-top:14px;">
-          <label style="display:block;font-size:11px;color:var(--muted);font-weight:700;letter-spacing:.4px;text-transform:uppercase;margin-bottom:6px;">해설</label>
-          <textarea class="passage" id="explanationBox" rows="1" placeholder="해설 없음 — 편집 모드에서 입력하거나 '해설 일괄 입력'으로 한 번에 채울 수 있어요" readonly style="background:#FCFBF5;border-left-color:var(--warn);"></textarea>
-        </div>
       </div>
     </div>
     <div class="navbar">
@@ -277,13 +228,32 @@ table.qtable tr:hover td{background:#FAFBFD;}
     </div>
     <div class="formrow"><label>문제(발문)</label><textarea id="f_stem"></textarea></div>
     <div class="formrow"><label>지문/자료 (선택)</label><textarea id="f_passage" style="min-height:90px;"></textarea></div>
-    <div class="formrow"><label>이미지 (구글 드라이브 링크, 여러 개 추가 가능)</label>
-      <div style="display:flex;gap:8px;">
-        <input type="text" id="f_imageLinkInput" placeholder="https://drive.google.com/file/d/...">
-        <button type="button" class="btn small ghost" id="f_addImageLink" style="flex-shrink:0;">추가</button>
+    <div class="formrow"><label>이미지 (파일 첨부, 여러 개 가능)</label>
+      <input type="file" id="f_imageFileInput" accept="image/*" multiple>
+      <div id="f_imageFileStatus" style="font-size:11px;color:var(--muted);margin-top:5px;">사진을 선택하면 자동으로 크기를 줄여서 문제 데이터에 바로 저장돼요. 외부 서비스나 링크가 필요 없어요.</div>
+      <details style="margin-top:8px;">
+        <summary style="font-size:11.5px;color:var(--muted);cursor:pointer;">또는 이미지 링크로 추가하기</summary>
+        <div style="display:flex;gap:8px;margin-top:8px;">
+          <input type="text" id="f_imageLinkInput" placeholder="https://drive.google.com/file/d/...">
+          <button type="button" class="btn small ghost" id="f_addImageLink" style="flex-shrink:0;">추가</button>
+        </div>
+      </details>
+      <div class="thumbrow" id="f_imgPreview" style="flex-direction:column;align-items:flex-start;margin-top:8px;"></div>
+    </div>
+    <div class="formrow"><label>표/그래프 데이터 (선택 — 여러 개 추가 가능, 이미지 대신 데이터로 넣으면 실제 표/그래프로 표시돼요)</label>
+      <div class="formgrid2" style="grid-template-columns:1fr 2fr;gap:8px;">
+        <select id="f_chartType">
+          <option value="table">표</option>
+          <option value="bar">막대그래프</option>
+          <option value="line">꺾은선그래프</option>
+          <option value="pie">원형그래프</option>
+        </select>
+        <input type="text" id="f_chartTitle" placeholder="제목(선택, 예: 연도별 발전량)">
       </div>
-      <div style="font-size:11px;color:var(--muted);margin-top:5px;">※ 드라이브 파일 공유 설정을 "링크가 있는 모든 사용자 - 뷰어"로 해두셔야 이미지가 보여요.</div>
-      <div class="thumbrow" id="f_imgPreview" style="flex-direction:column;align-items:flex-start;"></div>
+      <textarea id="f_chartData" style="min-height:80px;font-family:var(--mono);font-size:12px;margin-top:6px;" placeholder="첫 줄은 헤더, 콤마(,) 또는 탭으로 구분해서 붙여넣으세요.&#10;예)&#10;구분,2023,2024,2025&#10;매출,100,120,150&#10;비용,80,90,95&#10;&#10;원형그래프는 두 열만: 항목,값"></textarea>
+      <div style="font-size:11px;color:var(--muted);margin:5px 0 8px;">※ 표는 헤더+행 그대로 표시돼요. 막대/꺾은선은 첫 열을 가로축으로, 나머지 열을 시리즈로 그려요. 원형그래프는 "항목,값" 두 열만 사용해요.</div>
+      <button type="button" class="btn small ghost" id="f_addDataBlock">표/그래프 추가</button>
+      <div id="f_dataBlockPreview" style="margin-top:8px;display:flex;flex-direction:column;gap:6px;"></div>
     </div>
     <div class="formrow"><label>사용 이력 (기관 · 사용 시기 · 학년, 여러 건 추가 가능)</label>
       <div class="formgrid2" style="grid-template-columns:1.2fr 1fr 0.8fr;gap:8px;">
@@ -304,10 +274,6 @@ table.qtable tr:hover td{background:#FAFBFD;}
     <div class="formgrid2">
       <div class="formrow"><label>정답</label><input id="f_answer" maxlength="1"></div>
       <div class="formrow"><label>난이도</label><select id="f_difficulty"><option>미정</option><option>하</option><option>중</option><option>상</option></select></div>
-    </div>
-    <div class="formgrid2">
-      <div class="formrow"><label>유형</label><select id="f_type"><option>미정</option><option>모듈</option><option>피듈</option><option>피셋</option><option>직무</option></select></div>
-      <div class="formrow"><label>세부유형 (직접 입력)</label><input id="f_subType" placeholder="예: 응용수리, 자료해석, 문서이해 등"></div>
     </div>
     <div id="checkResult"></div>
     <div class="modalbtns">
@@ -338,20 +304,6 @@ table.qtable tr:hover td{background:#FAFBFD;}
         </select>
       </div>
       <div class="formrow"><label>출처</label><input id="batch_source" placeholder="예: 한신대 2025 모의고사"></div>
-      <div class="formrow"><label>기본 유형 (문항마다 아래 미리보기에서 개별 수정 가능)</label>
-        <select id="batch_type"><option>미정</option><option>모듈</option><option>피듈</option><option>피셋</option><option>직무</option></select>
-      </div>
-      <div class="formrow"><label>기본 세부유형 (문항마다 아래 미리보기에서 개별 수정 가능)</label>
-        <input type="text" id="batch_subType" placeholder="예: 응용수리, 자료해석 등"></div>
-    </div>
-
-    <div class="formrow" style="margin-bottom:14px;">
-      <label>사용 이력 (선택) — 입력하면 새로 등록되는 문항 전체에 적용되고, 중복으로 뜬 문항은 새로 등록하는 대신 이 이력만 기존 문항에 추가할 수 있어요</label>
-      <div class="formgrid2" style="grid-template-columns:1.2fr 1fr 0.8fr;gap:8px;">
-        <input type="text" id="batch_usageInst" placeholder="예: 한신대">
-        <input type="text" id="batch_usageWhen" placeholder="예: 2026년 1학기">
-        <input type="text" id="batch_usageGrade" placeholder="예: 3학년">
-      </div>
     </div>
 
     <div class="formrow" id="fileDropZone" style="border:1.5px dashed var(--line);border-radius:10px;padding:14px;background:#F9FAFC;transition:all .15s ease;">
@@ -370,24 +322,6 @@ table.qtable tr:hover td{background:#FAFBFD;}
     <div class="modalbtns" id="batchConfirmRow" style="display:none;">
       <button class="btn primary" id="registerAllOk">중복 없는 문항 전체 등록</button>
     </div>
-  </div>
-</div>
-
-<!-- 해설 일괄 입력 모달 -->
-<div class="overlay" id="overlayExplain">
-  <div class="modal wide">
-    <button type="button" class="modalCloseX" id="closeXExplain" aria-label="닫기">×</button>
-    <h2>해설 일괄 입력</h2>
-    <div class="modalsub">모의고사 하나를 고르고, 그 시험지의 해설(답안지) 텍스트를 통째로 붙여넣으면 문항번호로 자동 매칭해서 채워넣어요.<br>형식: 각 줄이 "1. 해설 내용..." 처럼 숫자로 시작하면 됩니다 (번호 뒤 여러 줄도 그 문항의 해설로 이어붙습니다).</div>
-    <div class="formrow"><label>출처(모의고사) 선택</label>
-      <select id="explain_source"></select>
-    </div>
-    <textarea class="batchArea" id="explainInput" style="min-height:260px;" placeholder="1. 정답은 ①이다. 왜냐하면...&#10;2. 정답은 ④이다...&#10;3. ..."></textarea>
-    <div class="modalbtns">
-      <button class="btn ghost" id="cancelExplain">취소</button>
-      <button class="btn primary" id="applyExplain">매칭해서 적용</button>
-    </div>
-    <div id="explainResult" style="margin-top:14px;"></div>
   </div>
 </div>
 
@@ -414,15 +348,6 @@ table.qtable tr:hover td{background:#FAFBFD;}
         </select>
       </div>
     </div>
-    <div class="formrow"><label>유형</label>
-      <select id="bulk_type">
-        <option value="">변경 안 함</option>
-        <option>미정</option><option>모듈</option><option>피듈</option><option>피셋</option><option>직무</option>
-      </select>
-    </div>
-    <div class="formrow"><label>세부유형 (입력 시 선택된 문항 모두 이 값으로 변경)</label>
-      <input type="text" id="bulk_subType" placeholder="비워두면 변경 안 함">
-    </div>
     <div class="formrow"><label>출처 (입력 시 선택된 문항 모두 이 값으로 변경)</label>
       <input type="text" id="bulk_source" placeholder="비워두면 변경 안 함">
     </div>
@@ -443,6 +368,7 @@ table.qtable tr:hover td{background:#FAFBFD;}
   </div>
 </div>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
 <script type="module" src="./app.js"></script>
