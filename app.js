@@ -121,16 +121,163 @@ function toViewableImageUrl(url){
   return url;
 }
 
+// ---- table/chart data (comma or tab separated, first row = header) ----
+function parseGridData(raw){
+  const lines = (raw||"").trim().split("\n").map(l=>l.trim()).filter(l=>l);
+  if(lines.length===0) return null;
+  const rows = lines.map(l => l.split(/\t|,/).map(c=>c.trim()));
+  return rows; // rows[0] = header
+}
+
+// 표 데이터를 넣으면, CBT에서 쓰는 것과 같은 스타일(남색 헤더/테두리/가운데정렬)의
+// <style>+<table> HTML을 그대로 생성한다. 렌더링에 쓰는 동시에 "코드 복사" 버튼으로
+// CBT 등 다른 곳에 그대로 붙여넣을 수 있게 원본 코드 문자열도 함께 돌려준다.
+function generateTableHtml(header, dataRows, uid){
+  const cls = "ncsTable_" + uid.replace(/[^a-zA-Z0-9]/g, "");
+  const nl2br = s => (s||"").replace(/\\n/g, "<br>");
+  const css =
+`<style>
+  .${cls} {
+    width:100%;
+    table-layout:fixed;
+    border-collapse:collapse;
+    color:#111;
+    font-size:15px;
+    line-height:1.5;
+  }
+  .${cls} th,
+  .${cls} td {
+    padding:13px 8px;
+    border:1px solid #777;
+    text-align:center;
+    vertical-align:middle;
+    white-space:normal !important;
+    word-break:keep-all;
+  }
+  .${cls} thead th {
+    background:#082d57 !important;
+    color:#fff !important;
+    font-weight:700;
+  }
+  .${cls} tbody td:first-child {
+    font-weight:700;
+  }
+  @media (max-width:700px) {
+    .${cls} { font-size:12px; }
+    .${cls} th, .${cls} td { padding:9px 4px; }
+  }
+</style>`;
+  const theadRow = "      " + header.map(h=>"<th>"+nl2br(h)+"</th>").join("\n      ");
+  const tbodyRows = dataRows.map(r =>
+    "    <tr>\n      " + r.map(c=>"<td>"+nl2br(c)+"</td>").join("\n      ") + "\n    </tr>"
+  ).join("\n");
+  const table =
+`<table class="${cls}">
+  <thead>
+    <tr>
+${theadRow}
+    </tr>
+  </thead>
+  <tbody>
+${tbodyRows}
+  </tbody>
+</table>`;
+  return css + "\n" + table;
+}
+
+function addCopyButton(wrap, htmlCode){
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.textContent = "코드 복사";
+  btn.style.cssText = "margin-top:6px;font-size:11px;padding:5px 10px;border-radius:6px;border:1px solid var(--line);background:#F1F3F8;color:var(--muted);cursor:pointer;";
+  btn.addEventListener("click", ()=>{
+    navigator.clipboard.writeText(htmlCode).then(()=>{
+      btn.textContent = "복사됨 ✓";
+      setTimeout(()=>{ btn.textContent = "코드 복사"; }, 1500);
+    });
+  });
+  wrap.appendChild(btn);
+}
+
+const PALETTE = ["#4C5FD5","#1F9A8D","#D98E2A","#C1546B","#6B5CA5","#3E8FB0","#B0703E","#5C8A3E"];
+
+let activeChartInstances = [];
+function renderChartBox(q){
+  const box = document.getElementById("chartBox");
+  activeChartInstances.forEach(c=>c.destroy());
+  activeChartInstances = [];
+  box.innerHTML = "";
+
+  // dataBlocks is the current format (array, supports multiple tables/charts per question).
+  // Falls back to the older single chartType/chartTitle/chartRaw fields for any question saved
+  // before this was changed to support multiple blocks.
+  const blocks = q.dataBlocks && q.dataBlocks.length ? q.dataBlocks
+    : (q.chartType && q.chartRaw ? [{type:q.chartType, title:q.chartTitle, raw:q.chartRaw}] : []);
+  if(!blocks.length) return;
+
+  blocks.forEach((block, idx)=>{
+    const rows = parseGridData(block.raw);
+    if(!rows || rows.length < 2) return;
+    const header = rows[0];
+    const dataRows = rows.slice(1);
+    const titleHtml = block.title ? '<div class="dataTitle">'+block.title+'</div>' : "";
+    const wrap = document.createElement("div");
+    wrap.style.marginBottom = "16px";
+    box.appendChild(wrap);
+
+    if(block.type === "table"){
+      const tableCode = generateTableHtml(header, dataRows, q.id+"_"+idx);
+      wrap.innerHTML = titleHtml + tableCode;
+      addCopyButton(wrap, tableCode);
+      return;
+    }
+
+    if(!window.Chart) return;
+    const canvasId = "chartCanvas_"+idx;
+
+    if(block.type === "pie"){
+      const labels = dataRows.map(r=>r[0]);
+      const values = dataRows.map(r=>parseFloat(r[1]) || 0);
+      wrap.innerHTML = titleHtml + '<div class="chartWrap"><canvas id="'+canvasId+'" height="220"></canvas></div>';
+      const ctx = document.getElementById(canvasId).getContext("2d");
+      activeChartInstances.push(new Chart(ctx, {
+        type: "pie",
+        data: { labels, datasets: [{ data: values, backgroundColor: labels.map((_,i)=>PALETTE[i%PALETTE.length]) }] },
+        options: { responsive:true, plugins:{ legend:{ display:true, position:"right" } } }
+      }));
+      return;
+    }
+
+    if(block.type === "bar" || block.type === "line"){
+      const categories = dataRows.map(r=>r[0]);
+      const seriesNames = header.slice(1);
+      const datasets = seriesNames.map((name,i)=>({
+        label: name,
+        data: dataRows.map(r=>parseFloat(r[i+1]) || 0),
+        backgroundColor: PALETTE[i%PALETTE.length],
+        borderColor: PALETTE[i%PALETTE.length],
+        fill: false
+      }));
+      wrap.innerHTML = titleHtml + '<div class="chartWrap"><canvas id="'+canvasId+'" height="220"></canvas></div>';
+      const ctx = document.getElementById(canvasId).getContext("2d");
+      activeChartInstances.push(new Chart(ctx, {
+        type: block.type,
+        data: { labels: categories, datasets },
+        options: { responsive:true, plugins:{ legend:{ display: seriesNames.length>1 } } }
+      }));
+    }
+  });
+}
+
 async function addNew(form){
   const id = nextIdFor(form.domain);
   const docData = {
     id, domain: form.domain, stem: form.stem, passage: form.passage,
     choices: form.choices, source: form.source || "그릿마인드랩 자체 제작",
     images: form.images||[], usageLog: form.usageLog||[],
-    answer: form.answer, difficulty: form.difficulty, type: form.type || "미정", subType: form.subType || "",
+    answer: form.answer, difficulty: form.difficulty,
     needsImage: !!form.needsImage,
-    examQuestionNumber: (form.examQuestionNumber===undefined ? null : form.examQuestionNumber),
-    explanation: form.explanation || "",
+    dataBlocks: form.dataBlocks||[],
     version: 1, history: [], deleted: false,
     createdAt: Date.now(), updatedAt: Date.now()
   };
@@ -144,55 +291,20 @@ async function applyReplace(id, form){
   const history = prev.history || [];
   history.push({
     stem:prev.stem, passage:prev.passage, choices:prev.choices, answer:prev.answer,
-    difficulty:prev.difficulty, type:prev.type, subType:prev.subType, images:prev.images, replacedAt: Date.now()
+    difficulty:prev.difficulty, images:prev.images, replacedAt: Date.now()
   });
   await updateDoc(doc(db, QUESTIONS_COL, id), {
     stem: form.stem, passage: form.passage, choices: form.choices,
     source: form.source || prev.source, images: form.images||[],
     usageLog: form.usageLog||[],
-    answer: form.answer, difficulty: form.difficulty, type: form.type, subType: form.subType,
+    answer: form.answer, difficulty: form.difficulty,
+    dataBlocks: form.dataBlocks||[],
     version: (prev.version||1)+1, history, updatedAt: Date.now()
   });
 }
 
 async function deleteQuestion(id){
   await updateDoc(doc(db, QUESTIONS_COL, id), { deleted: true, updatedAt: Date.now() });
-}
-
-// "1. 해설내용...\n2. 해설내용..." 형식의 해설 텍스트를 문항번호별로 분리한다.
-function parseExplanationText(rawText){
-  const lines = (rawText||"").split("\n").map(l=>l.trim()).filter(l=>l);
-  const result = {}; // { 문항번호: 해설텍스트 }
-  let curNum = null;
-  let curLines = [];
-  function flush(){
-    if(curNum!==null && curLines.length){
-      result[curNum] = curLines.join("\n").trim();
-    }
-  }
-  lines.forEach(line=>{
-    const m = line.match(/^(\d{1,3})[.\)]\s*(.*)$/);
-    if(m){
-      flush();
-      curNum = parseInt(m[1],10);
-      curLines = m[2] ? [m[2]] : [];
-    } else if(curNum!==null){
-      curLines.push(line);
-    }
-  });
-  flush();
-  return result;
-}
-
-// 일괄 붙여넣기에서 중복으로 판정된 문항을 새로 등록하는 대신, 기존 문항에 사용 이력만 덧붙일 때 사용
-async function addUsageToExisting(existingId, usage){
-  const snap = await getDoc(doc(db, QUESTIONS_COL, existingId));
-  if(!snap.exists()) return false;
-  const prev = snap.data();
-  const usageLog = (prev.usageLog||[]).slice();
-  usageLog.push(usage);
-  await updateDoc(doc(db, QUESTIONS_COL, existingId), { usageLog, updatedAt: Date.now() });
-  return true;
 }
 
 // ---------- one-time seed import ----------
@@ -230,13 +342,6 @@ function renderStats(){
   domSel.innerHTML = '<option value="">영역 전체</option>' + Object.keys(DOMAIN_CODE).map(d=>'<option>'+d+'</option>').join('');
   domSel.value = cur;
 
-  // 출처(모의고사) 필터 드롭다운을 실제 존재하는 출처 값들로 채운다
-  const srcSel = document.getElementById("sourceFilter");
-  const curSrc = srcSel.value;
-  const distinctSources = [...new Set(allQuestions.map(q=>q.source).filter(Boolean))].sort();
-  srcSel.innerHTML = '<option value="">출처(모의고사) 전체</option>' + distinctSources.map(s=>'<option value="'+s.replace(/"/g,'&quot;')+'">'+s+'</option>').join('');
-  srcSel.value = curSrc;
-
   document.getElementById("statrow").querySelectorAll("button[data-statdom]").forEach(btn=>{
     btn.addEventListener("click", ()=>{
       const dom = btn.getAttribute("data-statdom");
@@ -258,26 +363,13 @@ function renderStats(){
 function getFiltered(){
   const q = document.getElementById("searchBox").value.trim().toLowerCase();
   const dom = document.getElementById("domainFilter").value;
-  const src = document.getElementById("sourceFilter").value;
   const diff = document.getElementById("diffFilter").value;
-  const type = document.getElementById("typeFilter").value;
   const imgNeed = document.getElementById("imgNeedFilter").value;
   let list = allQuestions.slice();
   if(dom) list = list.filter(x=>x.domain===dom);
-  if(src) list = list.filter(x=>x.source===src);
   if(diff) list = list.filter(x=>(x.difficulty||"미정")===diff);
-  if(type) list = list.filter(x=>(x.type||"미정")===type);
   if(imgNeed==="needed") list = list.filter(x=>x.needsImage && (x.images||[]).length===0);
-  if(q) list = list.filter(x => (x.id+" "+x.stem+" "+(x.passage||"")+" "+(x.source||"")+" "+(x.type||"")+" "+(x.subType||"")).toLowerCase().includes(q));
-  // 출처(모의고사)로 좁혀서 볼 때는, 원본 시험지의 문항번호 순서(1,2,3...)대로 보이게 정렬해서
-  // 답안지/해설과 나란히 맞춰볼 수 있게 한다. 원문항번호가 없는 문항은 뒤로 보낸다.
-  if(src){
-    list.sort((a,b)=>{
-      const na = a.examQuestionNumber!=null ? a.examQuestionNumber : Infinity;
-      const nb = b.examQuestionNumber!=null ? b.examQuestionNumber : Infinity;
-      return na - nb;
-    });
-  }
+  if(q) list = list.filter(x => (x.id+" "+x.stem+" "+(x.passage||"")+" "+(x.source||"")).toLowerCase().includes(q));
   return list;
 }
 
@@ -290,7 +382,7 @@ function renderTable(){
 
   const tbody = document.getElementById("tbody");
   if(list.length===0){
-    tbody.innerHTML = '<tr><td colspan="12"><div class="emptyrow">조건에 맞는 문제가 없습니다.</div></td></tr>';
+    tbody.innerHTML = '<tr><td colspan="9"><div class="emptyrow">조건에 맞는 문제가 없습니다.</div></td></tr>';
     renderBulkBar();
     return;
   }
@@ -298,6 +390,10 @@ function renderTable(){
     const col = DOMAIN_COLORS[q.domain] || {c:'#888',bg:'#eee'};
     const stemShort = (q.stem||"").slice(0,45) + ((q.stem||"").length>45?"…":"");
     const imgCount = (q.images||[]).length;
+    const dataBlockCount = q.dataBlocks ? q.dataBlocks.length : (q.chartType && q.chartRaw ? 1 : 0);
+    const hasData = dataBlockCount > 0;
+    const firstBlockType = q.dataBlocks && q.dataBlocks.length ? q.dataBlocks[0].type : q.chartType;
+    const dataBadgeIcon = firstBlockType==="table" ? "📊" : firstBlockType==="pie" ? "🥧" : "📈";
     const usage = q.usageLog||[];
     const usageShort = usage.length ? usage.map(u=>u.institution).filter(Boolean).join(', ') : '-';
     const checked = selectedIds.has(q.id) ? 'checked' : '';
@@ -305,14 +401,15 @@ function renderTable(){
       '<td><input type="checkbox" class="rowCheck" data-id="'+q.id+'" '+checked+'></td>'+
       '<td class="idcell">'+q.id+'</td>'+
       '<td><span class="domchip" style="color:'+col.c+';background:'+col.bg+'">'+q.domain+'</span></td>'+
-      '<td>'+ (q.type||"미정") +'</td>'+
-      '<td style="font-size:12px;color:var(--muted);">'+ (q.subType||"-") +'</td>'+
       '<td class="stemcell" title="'+ (q.stem||"").replace(/"/g,'&quot;') +'">'+stemShort+'</td>'+
       '<td>'+ (q.difficulty||"미정") +'</td>'+
       '<td class="idcell">'+ (q.answer||"-") +'</td>'+
       '<td style="font-size:11.5px;color:var(--muted);">'+ (q.source||"-") +'</td>'+
       '<td style="font-size:11.5px;color:var(--muted);max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="'+usageShort.replace(/"/g,'&quot;')+'">'+usageShort+'</td>'+
-      '<td class="imgbadge">'+ (imgCount>0 ? ('🖼 '+imgCount) : (q.needsImage ? '<span style="color:var(--warn);font-weight:700;">⚠ 필요</span>' : '-')) +'</td>'+
+      '<td class="imgbadge">'+
+        (hasData ? '<span title="표/그래프 데이터 있음">'+dataBadgeIcon+(dataBlockCount>1?(' '+dataBlockCount):'')+'</span> ' : '') +
+        (imgCount>0 ? ('🖼 '+imgCount) : (q.needsImage ? '<span style="color:var(--warn);font-weight:700;">⚠ 필요</span>' : (hasData ? '' : '-'))) +
+      '</td>'+
       '<td class="actioncell">'+
         '<button class="btn small ghost" data-act="view" data-id="'+q.id+'">보기</button>'+
         '<button class="btn small ghost" data-act="edit" data-id="'+q.id+'">편집</button>'+
@@ -374,12 +471,13 @@ document.getElementById("bulkDeleteBtn").addEventListener("click", async ()=>{
   renderTable();
 });
 
-document.getElementById("searchApplyBtn").addEventListener("click", renderTable);
-document.getElementById("searchBox").addEventListener("keydown", (e)=>{ if(e.key==="Enter") renderTable(); });
+["searchBox","domainFilter","diffFilter","imgNeedFilter"].forEach(id=>{
+  document.getElementById(id).addEventListener("input", renderTable);
+  document.getElementById(id).addEventListener("change", renderTable);
+});
 
 // ---------- view toggle ----------
-document.getElementById("viewListBtn").addEventListener("click", async ()=>{
-  await flushDetailEdits();
+document.getElementById("viewListBtn").addEventListener("click", ()=>{
   document.getElementById("listView").style.display="block";
   document.getElementById("detailView").style.display="none";
   document.getElementById("viewListBtn").classList.add("active");
@@ -405,13 +503,6 @@ function openDetailFor(id){
   showDetailView();
 }
 
-// 텍스트 영역(발문/지문/보기)을 입력 내용에 맞게 자동으로 높이 조절
-function autoResize(el){
-  if(!el) return;
-  el.style.height = "auto";
-  el.style.height = el.scrollHeight + "px";
-}
-
 function renderDetail(){
   const q = currentList[detailIdx];
   if(!q) return;
@@ -421,16 +512,13 @@ function renderDetail(){
   const chip = document.getElementById("domainChip");
   chip.textContent=q.domain; chip.style.color=col.c; chip.style.background=col.bg;
   document.getElementById("qid").textContent=q.id;
-  document.getElementById("domainSelect").value = q.domain;
   document.getElementById("qsource").textContent=q.source||"-";
   const usageBox = document.getElementById("qUsageList");
   const usage = q.usageLog||[];
   usageBox.innerHTML = usage.length
     ? usage.map(u=>'<div>'+ [u.institution, u.when, u.grade].filter(Boolean).join(' · ') +'</div>').join('')
     : '-';
-  const stemEl = document.getElementById("stemText");
-  stemEl.value = q.stem||"";
-  autoResize(stemEl);
+  document.getElementById("stemText").textContent=q.stem;
   const imgsBox = document.getElementById("imgsBox");
   const imgList = (q.images||[]);
   let imgsHtml = imgList.map(src=>'<img src="'+toViewableImageUrl(src)+'" loading="lazy">').join('');
@@ -438,192 +526,28 @@ function renderDetail(){
     imgsHtml = '<div style="background:var(--warn-bg);color:var(--warn);font-weight:700;font-size:12.5px;padding:8px 12px;border-radius:8px;">⚠ 이 문항은 원본에 그림/표가 있었을 가능성이 있어요 — "편집"에서 이미지 링크를 추가해주세요.</div>' + imgsHtml;
   }
   imgsBox.innerHTML = imgsHtml;
+  renderChartBox(q);
   const passageBox = document.getElementById("passageBox");
-  passageBox.value = q.passage||"";
-  autoResize(passageBox);
-  const explanationBox = document.getElementById("explanationBox");
-  explanationBox.value = q.explanation||"";
-  autoResize(explanationBox);
+  if(q.passage && q.passage.trim()){ passageBox.style.display="block"; passageBox.textContent=q.passage; }
+  else passageBox.style.display="none";
   const list = document.getElementById("choicesList"); list.innerHTML="";
   const marks=['①','②','③','④','⑤'];
-  (q.choices||[]).forEach((c,i)=>{
-    const li=document.createElement("li");
-    const span=document.createElement("span"); span.className="cnum"; span.textContent=marks[i]||"";
-    const ta=document.createElement("textarea"); ta.rows=1; ta.value=c; ta.dataset.cidx=String(i); ta.setAttribute("readonly","");
-    li.appendChild(span); li.appendChild(ta);
-    list.appendChild(li);
-    autoResize(ta);
-  });
+  (q.choices||[]).forEach((c,i)=>{ const li=document.createElement("li"); li.innerHTML='<span class="cnum">'+marks[i]+'</span><span>'+c+'</span>'; list.appendChild(li); });
   document.getElementById("diffSelect").value = q.difficulty||"미정";
-  document.getElementById("typeSelect").value = q.type||"미정";
-  document.getElementById("subTypeInput").value = q.subType||"";
   document.getElementById("answerInput").value = q.answer||"";
-  document.getElementById("examNumInput").value = (q.examQuestionNumber!=null ? q.examQuestionNumber : "");
   document.getElementById("versionTag").textContent = q.version&&q.version>1 ? ("v"+q.version+" · 이전 버전 "+(q.history?q.history.length:0)+"건 보관") : "";
   document.getElementById("prevBtn").disabled = detailIdx===0;
   document.getElementById("nextBtn").disabled = detailIdx===currentList.length-1;
-  setSaveStatus("", "");
-  // 문항이 바뀔 때마다 항상 보기(읽기전용) 모드로 초기화 — 실수로 이전 문항의 편집 상태가 이어지지 않게 함
-  setDetailEditMode(false);
 }
-
-// ---- 상세보기 편집모드 토글 (기본 읽기전용, "편집" 버튼을 눌러야 발문/지문/보기 수정 가능) ----
-let detailEditMode = false;
-function setDetailEditMode(on){
-  detailEditMode = on;
-  const stemEl = document.getElementById("stemText");
-  const passageEl = document.getElementById("passageBox");
-  const explanationEl = document.getElementById("explanationBox");
-  const choiceTAs = document.getElementById("choicesList").querySelectorAll("textarea");
-  const btn = document.getElementById("detailEditToggle");
-  const note = document.getElementById("editModeNote");
-  const maincard = document.getElementById("maincard");
-  if(on){
-    stemEl.removeAttribute("readonly");
-    passageEl.removeAttribute("readonly");
-    explanationEl.removeAttribute("readonly");
-    choiceTAs.forEach(ta=>ta.removeAttribute("readonly"));
-    if(btn){ btn.textContent = "✓ 편집 완료 (눌러서 저장)"; btn.classList.remove("outline"); btn.classList.add("primary"); }
-    if(note) note.style.display = "inline-flex";
-    if(maincard) maincard.classList.add("editing");
-    stemEl.focus();
-  } else {
-    stemEl.setAttribute("readonly","");
-    passageEl.setAttribute("readonly","");
-    explanationEl.setAttribute("readonly","");
-    choiceTAs.forEach(ta=>ta.setAttribute("readonly",""));
-    if(btn){ btn.textContent = "✏️ 편집하기"; btn.classList.remove("primary"); btn.classList.add("outline"); }
-    if(note) note.style.display = "none";
-    if(maincard) maincard.classList.remove("editing");
-  }
-}
-
-// ---- 상세보기 저장 (자동저장 + 저장 버튼 + 상태표시) ----
-function setSaveStatus(txt, kind){
-  const el = document.getElementById("detailSaveStatus");
-  if(!el) return;
-  el.textContent = txt || "";
-  el.style.color = kind==="ok" ? "var(--ok)" : (kind==="err" ? "var(--danger)" : "var(--muted)");
-}
-
-// 로컬 객체(currentList)를 먼저 갱신한 뒤 Firestore에 저장 → 다음/이전으로 넘어가도 저장한 값이 그대로 보임
-async function saveDetailPatch(patch){
-  const q = currentList[detailIdx];
-  if(!q) return;
-  Object.assign(q, patch);
-  setSaveStatus("저장 중…", "saving");
-  try{
-    await updateDoc(doc(db, QUESTIONS_COL, q.id), { ...patch, updatedAt: Date.now() });
-    setSaveStatus("저장됨 ✓", "ok");
-  }catch(err){
-    console.error(err);
-    setSaveStatus("저장 실패 — 다시 시도해주세요", "err");
-  }
-}
-
-// 입력칸 값 중 저장된 값과 다른 것만 저장 (다음/이전/목록으로 넘어가기 직전 호출)
-async function flushDetailEdits(){
-  if(document.getElementById("detailView").style.display === "none") return;
-  const q = currentList[detailIdx];
-  if(!q) return;
-  const patch = {};
-  const domain = document.getElementById("domainSelect").value;
-  const diff = document.getElementById("diffSelect").value;
-  const type = document.getElementById("typeSelect").value;
-  const subType = document.getElementById("subTypeInput").value.trim();
-  const answer = document.getElementById("answerInput").value.trim();
-  const examNumRaw = document.getElementById("examNumInput").value.trim();
-  const examNum = examNumRaw ? parseInt(examNumRaw,10) : null;
-  const stem = document.getElementById("stemText").value.trim();
-  const passage = document.getElementById("passageBox").value.trim();
-  const explanation = document.getElementById("explanationBox").value.trim();
-  const choices = Array.from(document.getElementById("choicesList").querySelectorAll("textarea"))
-    .map(ta=>ta.value.trim());
-  if(domain !== q.domain) patch.domain = domain;
-  if(diff !== (q.difficulty||"미정")) patch.difficulty = diff;
-  if(type !== (q.type||"미정")) patch.type = type;
-  if(subType !== (q.subType||"")) patch.subType = subType;
-  if(answer !== (q.answer||"")) patch.answer = answer;
-  if(examNum !== (q.examQuestionNumber!=null ? q.examQuestionNumber : null)) patch.examQuestionNumber = examNum;
-  if(stem !== (q.stem||"")) patch.stem = stem;
-  if(passage !== (q.passage||"")) patch.passage = passage;
-  if(explanation !== (q.explanation||"")) patch.explanation = explanation;
-  if(choices.length && JSON.stringify(choices) !== JSON.stringify(q.choices||[])) patch.choices = choices;
-  if(Object.keys(patch).length) await saveDetailPatch(patch);
-}
-
-// index.html이 옛 버전이어도 저장 버튼이 사이드카드(정답 밑)에 생기도록 보강
-function ensureDetailSaveUI(){
-  if(document.getElementById("detailSaveBtn")) return; // 이미 HTML에 있으면 그대로 사용
-  const answer = document.getElementById("answerInput");
-  if(!answer) return;
-  const field = answer.closest(".field") || answer.parentElement;
-  const btn = document.createElement("button");
-  btn.id = "detailSaveBtn";
-  btn.className = "btn primary small";
-  btn.style.cssText = "width:100%;margin-top:4px;";
-  btn.textContent = "저장";
-  const status = document.createElement("div");
-  status.id = "detailSaveStatus";
-  status.style.cssText = "font-size:11px;font-family:var(--mono);color:var(--muted);text-align:center;margin-top:6px;min-height:14px;";
-  field.insertAdjacentElement("afterend", btn);
-  btn.insertAdjacentElement("afterend", status);
-}
-ensureDetailSaveUI();
-
-document.getElementById("prevBtn").addEventListener("click", async ()=>{ if(detailIdx>0){ await flushDetailEdits(); detailIdx--; renderDetail(); } });
-document.getElementById("nextBtn").addEventListener("click", async ()=>{ if(detailIdx<currentList.length-1){ await flushDetailEdits(); detailIdx++; renderDetail(); } });
-document.getElementById("detailSaveBtn").addEventListener("click", async ()=>{ await flushDetailEdits(); setSaveStatus("저장됨 ✓", "ok"); });
-document.getElementById("domainSelect").addEventListener("change", (e)=>{
-  const newDomain = e.target.value;
-  const col = DOMAIN_COLORS[newDomain]||{c:"var(--primary-2)",bg:"#eee"};
-  const chip = document.getElementById("domainChip");
-  chip.textContent = newDomain; chip.style.color = col.c; chip.style.background = col.bg;
-  saveDetailPatch({ domain: newDomain });
+document.getElementById("prevBtn").addEventListener("click", ()=>{ if(detailIdx>0){ detailIdx--; renderDetail(); } });
+document.getElementById("nextBtn").addEventListener("click", ()=>{ if(detailIdx<currentList.length-1){ detailIdx++; renderDetail(); } });
+document.getElementById("diffSelect").addEventListener("change", async(e)=>{
+  const id=currentList[detailIdx].id;
+  await updateDoc(doc(db, QUESTIONS_COL, id), { difficulty: e.target.value, updatedAt: Date.now() });
 });
-document.getElementById("diffSelect").addEventListener("change", (e)=> saveDetailPatch({ difficulty: e.target.value }));
-document.getElementById("typeSelect").addEventListener("change", (e)=> saveDetailPatch({ type: e.target.value }));
-document.getElementById("subTypeInput").addEventListener("change", (e)=> saveDetailPatch({ subType: e.target.value.trim() }));
-document.getElementById("answerInput").addEventListener("change", (e)=> saveDetailPatch({ answer: e.target.value.trim() }));
-document.getElementById("examNumInput").addEventListener("change", (e)=>{
-  const v = e.target.value.trim();
-  saveDetailPatch({ examQuestionNumber: v ? parseInt(v,10) : null });
-});
-
-// 발문(문제) 직접 수정 — 입력할 때마다 높이 자동조절, 포커스를 벗어나면(change) 저장
-document.getElementById("stemText").addEventListener("input", (e)=> autoResize(e.target));
-document.getElementById("stemText").addEventListener("change", (e)=> saveDetailPatch({ stem: e.target.value.trim() }));
-
-// 지문/자료 직접 수정 (비어 있던 문항에 새로 지문을 추가하는 것도 가능)
-document.getElementById("passageBox").addEventListener("input", (e)=> autoResize(e.target));
-document.getElementById("passageBox").addEventListener("change", (e)=> saveDetailPatch({ passage: e.target.value.trim() }));
-
-// 해설 직접 수정
-document.getElementById("explanationBox").addEventListener("input", (e)=> autoResize(e.target));
-document.getElementById("explanationBox").addEventListener("change", (e)=> saveDetailPatch({ explanation: e.target.value.trim() }));
-
-// 보기(①~⑤) 직접 수정 — textarea들이 detail 렌더링마다 새로 생성되므로 목록(ul)에 이벤트 위임
-document.getElementById("choicesList").addEventListener("input", (e)=>{
-  if(e.target.tagName==="TEXTAREA") autoResize(e.target);
-});
-document.getElementById("choicesList").addEventListener("change", (e)=>{
-  if(e.target.tagName!=="TEXTAREA") return;
-  const q = currentList[detailIdx];
-  if(!q) return;
-  const choices = Array.from(document.getElementById("choicesList").querySelectorAll("textarea"))
-    .map(ta=>ta.value.trim());
-  saveDetailPatch({ choices });
-});
-
-// "편집" 버튼: 누르면 발문/지문/보기가 수정 가능해짐. 다시 누르면("편집 완료") 변경분을 저장하고 읽기전용으로 되돌아감
-document.getElementById("detailEditToggle").addEventListener("click", async ()=>{
-  if(detailEditMode){
-    await flushDetailEdits();
-    setDetailEditMode(false);
-    setSaveStatus("저장됨 ✓", "ok");
-  } else {
-    setDetailEditMode(true);
-  }
+document.getElementById("answerInput").addEventListener("change", async(e)=>{
+  const id=currentList[detailIdx].id;
+  await updateDoc(doc(db, QUESTIONS_COL, id), { answer: e.target.value, updatedAt: Date.now() });
 });
 
 // ---------- bulk edit modal ----------
@@ -632,8 +556,6 @@ document.getElementById("bulkEditBtn").addEventListener("click", ()=>{
   document.getElementById("bulkModalCount").textContent = selectedIds.size;
   document.getElementById("bulk_domain").value = "";
   document.getElementById("bulk_difficulty").value = "";
-  document.getElementById("bulk_type").value = "";
-  document.getElementById("bulk_subType").value = "";
   document.getElementById("bulk_source").value = "";
   ["bulk_usageInst","bulk_usageWhen","bulk_usageGrade"].forEach(id=>document.getElementById(id).value="");
   document.getElementById("bulkResult").innerHTML = "";
@@ -646,15 +568,13 @@ overlayBulk.addEventListener("click", e=>{ if(e.target===overlayBulk) overlayBul
 document.getElementById("applyBulk").addEventListener("click", async ()=>{
   const domain = document.getElementById("bulk_domain").value;
   const difficulty = document.getElementById("bulk_difficulty").value;
-  const type = document.getElementById("bulk_type").value;
-  const subType = document.getElementById("bulk_subType").value.trim();
   const source = document.getElementById("bulk_source").value.trim();
   const uInst = document.getElementById("bulk_usageInst").value.trim();
   const uWhen = document.getElementById("bulk_usageWhen").value.trim();
   const uGrade = document.getElementById("bulk_usageGrade").value.trim();
   const addUsage = uInst || uWhen || uGrade;
 
-  if(!domain && !difficulty && !type && !subType && !source && !addUsage){
+  if(!domain && !difficulty && !source && !addUsage){
     document.getElementById("bulkResult").innerHTML = '<div class="dupBox"><b>변경할 항목을 하나 이상 입력해주세요.</b></div>';
     return;
   }
@@ -666,8 +586,6 @@ document.getElementById("applyBulk").addEventListener("click", async ()=>{
     const patch = { updatedAt: Date.now() };
     if(domain) patch.domain = domain;
     if(difficulty) patch.difficulty = difficulty;
-    if(type) patch.type = type;
-    if(subType) patch.subType = subType;
     if(source) patch.source = source;
     if(addUsage){
       const usageLog = (q.usageLog||[]).slice();
@@ -681,69 +599,29 @@ document.getElementById("applyBulk").addEventListener("click", async ()=>{
   setTimeout(()=>{ overlayBulk.classList.remove("open"); selectedIds.clear(); renderTable(); }, 900);
 });
 
-// ---------- 해설 일괄 입력 모달 ----------
-const overlayExplain = document.getElementById("overlayExplain");
-document.getElementById("openExplain").addEventListener("click", ()=>{
-  const distinctSources = [...new Set(allQuestions.map(q=>q.source).filter(Boolean))].sort();
-  const sel = document.getElementById("explain_source");
-  const curFilterSrc = document.getElementById("sourceFilter").value; // 목록에서 이미 출처를 골라뒀다면 기본 선택으로
-  sel.innerHTML = distinctSources.map(s=>'<option'+(s===curFilterSrc?' selected':'')+'>'+s+'</option>').join('');
-  document.getElementById("explainInput").value = "";
-  document.getElementById("explainResult").innerHTML = "";
-  overlayExplain.classList.add("open");
-});
-document.getElementById("cancelExplain").addEventListener("click", ()=>overlayExplain.classList.remove("open"));
-document.getElementById("closeXExplain").addEventListener("click", ()=>overlayExplain.classList.remove("open"));
-overlayExplain.addEventListener("click", e=>{ if(e.target===overlayExplain) overlayExplain.classList.remove("open"); });
-
-document.getElementById("applyExplain").addEventListener("click", async ()=>{
-  const source = document.getElementById("explain_source").value;
-  const raw = document.getElementById("explainInput").value;
-  const resBox = document.getElementById("explainResult");
-  if(!source){ resBox.innerHTML = '<div class="dupBox"><b>출처(모의고사)를 선택해주세요.</b></div>'; return; }
-  const parsed = parseExplanationText(raw);
-  const numbers = Object.keys(parsed).map(n=>parseInt(n,10));
-  if(numbers.length===0){ resBox.innerHTML = '<div class="dupBox"><b>인식된 해설이 없습니다.</b> "1. 해설내용" 형식으로 붙여넣어 주세요.</div>'; return; }
-
-  const targets = allQuestions.filter(q=>q.source===source);
-  let matched = 0;
-  const unmatchedNums = [];
-  for(const num of numbers){
-    const q = targets.find(x=>x.examQuestionNumber===num);
-    if(!q){ unmatchedNums.push(num); continue; }
-    await updateDoc(doc(db, QUESTIONS_COL, q.id), { explanation: parsed[num], updatedAt: Date.now() });
-    matched++;
-  }
-  const noNumTargets = targets.filter(q=>q.examQuestionNumber==null).length;
-  let html = '<div class="okBox">✓ '+matched+'개 문항에 해설이 적용되었습니다.</div>';
-  if(unmatchedNums.length){
-    html += '<div class="dupBox" style="margin-top:8px;"><b>매칭 안 된 번호: '+unmatchedNums.join(', ')+'</b><br>해당 번호의 문항을 이 출처에서 찾지 못했어요. 상세보기에서 "원문항번호"가 제대로 들어가 있는지 확인해주세요.</div>';
-  }
-  if(noNumTargets>0){
-    html += '<div style="font-size:11.5px;color:var(--muted);margin-top:8px;">참고: 이 출처의 문항 중 '+noNumTargets+'개는 원문항번호가 비어있어 매칭 대상에서 제외됐어요.</div>';
-  }
-  resBox.innerHTML = html;
-});
-
 // ---------- single add/edit modal ----------
 const overlaySingle = document.getElementById("overlaySingle");
 let editingId = null;
 let pendingImages = [];
+let pendingDataBlocks = [];
 
 function resetSingleForm(){
-  ["f_source","f_stem","f_passage","f_answer"].forEach(id=>document.getElementById(id).value="");
+  ["f_source","f_stem","f_passage","f_answer","f_chartTitle","f_chartData"].forEach(id=>document.getElementById(id).value="");
   [1,2,3,4,5].forEach(n=>document.getElementById("f_c"+n).value="");
   document.getElementById("f_domain").value="의사소통능력";
   document.getElementById("f_difficulty").value="미정";
-  document.getElementById("f_type").value="미정";
-  document.getElementById("f_subType").value="";
+  document.getElementById("f_chartType").value="table";
+  document.getElementById("f_dataBlockPreview").innerHTML="";
   document.getElementById("f_imageLinkInput").value="";
+  document.getElementById("f_imageFileInput").value="";
+  document.getElementById("f_imageFileStatus").textContent="사진을 선택하면 자동으로 크기를 줄여서 문제 데이터에 바로 저장돼요. 외부 서비스나 링크가 필요 없어요.";
   document.getElementById("f_imgPreview").innerHTML="";
   ["f_usageInst","f_usageWhen","f_usageGrade"].forEach(id=>document.getElementById(id).value="");
   document.getElementById("f_usagePreview").innerHTML="";
   document.getElementById("checkResult").innerHTML="";
   pendingImages = [];
   pendingUsage = [];
+  pendingDataBlocks = [];
 }
 document.getElementById("openSingle").addEventListener("click", ()=>{
   editingId=null;
@@ -762,8 +640,12 @@ function openEditFor(id){
   [1,2,3,4,5].forEach(n=>document.getElementById("f_c"+n).value=(q.choices||[])[n-1]||"");
   document.getElementById("f_answer").value = q.answer||"";
   document.getElementById("f_difficulty").value = q.difficulty||"미정";
-  document.getElementById("f_type").value = q.type||"미정";
-  document.getElementById("f_subType").value = q.subType||"";
+  document.getElementById("f_chartType").value = "table";
+  document.getElementById("f_chartTitle").value = "";
+  document.getElementById("f_chartData").value = "";
+  pendingDataBlocks = q.dataBlocks && q.dataBlocks.length ? q.dataBlocks.slice()
+    : (q.chartType && q.chartRaw ? [{type:q.chartType, title:q.chartTitle||"", raw:q.chartRaw}] : []);
+  renderDataBlockPreview();
   document.getElementById("f_imageLinkInput").value="";
   pendingImages = (q.images||[]).slice();
   renderImgPreview();
@@ -776,6 +658,33 @@ function openEditFor(id){
 document.getElementById("cancelSingle").addEventListener("click", ()=>overlaySingle.classList.remove("open"));
 document.getElementById("closeXSingle").addEventListener("click", ()=>overlaySingle.classList.remove("open"));
 overlaySingle.addEventListener("click", e=>{ if(e.target===overlaySingle) overlaySingle.classList.remove("open"); });
+
+const DATA_TYPE_LABEL = {table:"표", bar:"막대그래프", line:"꺾은선그래프", pie:"원형그래프"};
+function renderDataBlockPreview(){
+  document.getElementById("f_dataBlockPreview").innerHTML = pendingDataBlocks.map((b,i)=>
+    '<div style="display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:6px;padding:6px 10px;font-size:12px;">'+
+    '<span style="font-weight:700;">'+ DATA_TYPE_LABEL[b.type] +'</span>'+
+    '<span style="color:var(--muted);">'+ (b.title || "(제목 없음)") +'</span>'+
+    '<button type="button" data-rmD="'+i+'" style="margin-left:auto;border:none;background:none;cursor:pointer;color:var(--danger);font-weight:700;">×</button>'+
+    '</div>'
+  ).join('');
+  document.getElementById("f_dataBlockPreview").querySelectorAll("button[data-rmD]").forEach(btn=>{
+    btn.addEventListener("click", ()=>{
+      pendingDataBlocks.splice(parseInt(btn.getAttribute("data-rmD"),10), 1);
+      renderDataBlockPreview();
+    });
+  });
+}
+document.getElementById("f_addDataBlock").addEventListener("click", ()=>{
+  const type = document.getElementById("f_chartType").value;
+  const title = document.getElementById("f_chartTitle").value.trim();
+  const raw = document.getElementById("f_chartData").value;
+  if(!raw.trim()) return;
+  pendingDataBlocks.push({type, title, raw});
+  document.getElementById("f_chartTitle").value = "";
+  document.getElementById("f_chartData").value = "";
+  renderDataBlockPreview();
+});
 
 function renderImgPreview(){
   document.getElementById("f_imgPreview").innerHTML = pendingImages.map((link,i)=>
@@ -799,6 +708,48 @@ document.getElementById("f_addImageLink").addEventListener("click", ()=>{
   pendingImages.push(link);
   input.value = "";
   renderImgPreview();
+});
+
+// 파일을 캔버스로 리사이즈+압축한 뒤 base64 데이터 URL로 변환 (외부 저장소 없이 문서에 바로 저장)
+function compressImageFile(file, maxWidth=1000, quality=0.7){
+  return new Promise((resolve, reject)=>{
+    const reader = new FileReader();
+    reader.onload = (e)=>{
+      const img = new Image();
+      img.onload = ()=>{
+        let w = img.width, h = img.height;
+        if(w > maxWidth){ h = Math.round(h * maxWidth / w); w = maxWidth; }
+        const canvas = document.createElement("canvas");
+        canvas.width = w; canvas.height = h;
+        canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL("image/jpeg", quality));
+      };
+      img.onerror = reject;
+      img.src = e.target.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+document.getElementById("f_imageFileInput").addEventListener("change", async (e)=>{
+  const files = Array.from(e.target.files);
+  const statusEl = document.getElementById("f_imageFileStatus");
+  for(const file of files){
+    statusEl.textContent = "'"+file.name+"' 압축 중...";
+    try{
+      let dataUrl = await compressImageFile(file, 1000, 0.7);
+      if(dataUrl.length > 700000){
+        dataUrl = await compressImageFile(file, 800, 0.5); // 여전히 크면 한 번 더 압축
+      }
+      pendingImages.push(dataUrl);
+      renderImgPreview();
+      statusEl.textContent = "✓ 사진을 추가했어요 (약 "+Math.round(dataUrl.length/1024)+"KB). 여러 장 더 첨부할 수 있어요.";
+    }catch(err){
+      console.error(err);
+      statusEl.textContent = "'"+file.name+"' 처리에 실패했어요.";
+    }
+  }
+  e.target.value = "";
 });
 
 let pendingUsage = [];
@@ -837,10 +788,9 @@ function readForm(){
     choices: [1,2,3,4,5].map(n=>document.getElementById("f_c"+n).value.trim()).filter(v=>v),
     answer: document.getElementById("f_answer").value.trim(),
     difficulty: document.getElementById("f_difficulty").value,
-    type: document.getElementById("f_type").value,
-    subType: document.getElementById("f_subType").value.trim(),
     images: pendingImages.slice(),
-    usageLog: pendingUsage.slice()
+    usageLog: pendingUsage.slice(),
+    dataBlocks: pendingDataBlocks.slice()
   };
 }
 
@@ -940,69 +890,9 @@ async function extractDocxText(file){
   return result.value;
 }
 
-// 파일명에서 사용이력(기관·시기·학년)과 출처를 추측해서 뽑아낸다.
-// 예: "2026년 3월 29일 포항제철공업고등학교 2~3학년 70제.pdf"
-//     -> 기관: 포항제철공업고등학교 / 시기: 2026년 3월 29일 / 학년: 2~3학년
-// "~학교/~대학교"로 안 끝나는 줄임말 기관명(한신대, 조선대 등)도 파일명에서 잡히도록 별도 목록으로 보강
-const KNOWN_INSTITUTION_ALIASES = [
-  "한신대","국민대","조선대","서울과기대","수도전기공업고등학교","수도공고","경기영상과학고"
-];
-
-function parseFileNameMeta(filename){
-  const base = (filename||"").replace(/\.[^.]+$/, "").trim(); // 확장자 제거
-  const result = { institution:"", when:"", grade:"", source: base };
-
-  // 기관명: 자주 쓰는 줄임말 목록(한신대, 서울과기대 등)을 먼저 확인하고,
-  // 없으면 ...초등학교/중학교/고등학교/대학교/대학/전문대학로 끝나는 덩어리를 찾는다.
-  // (목록을 먼저 보는 이유: "서울과기대 조형대학"처럼 뒤에 학과명이 붙으면 일반 규칙이
-  //  "조형대학"을 기관명으로 잘못 잡는 경우가 있어서, 실제 협력기관명을 우선함)
-  const aliasHits = KNOWN_INSTITUTION_ALIASES.filter(name=>base.includes(name));
-  if(aliasHits.length){
-    result.institution = aliasHits.sort((a,b)=>b.length-a.length)[0];
-  } else {
-    const instMatch = base.match(/[가-힣A-Za-z0-9]+(?:초등학교|중학교|고등학교|전문대학|대학교|대학)/);
-    if(instMatch) result.institution = instMatch[0];
-  }
-
-  // 날짜: "2026년 3월 29일" 형식을 우선 찾고, 없으면 "2026년 1학기" 같은 학기 표기를 찾음
-  const dateMatch = base.match(/(\d{4})\s*년\s*(\d{1,2})\s*월\s*(\d{1,2})\s*일/);
-  if(dateMatch){
-    result.when = dateMatch[1]+"년 "+dateMatch[2]+"월 "+dateMatch[3]+"일";
-  } else {
-    const semMatch = base.match(/(\d{4})\s*년\s*(\d)\s*학기/);
-    if(semMatch) result.when = semMatch[1]+"년 "+semMatch[2]+"학기";
-    else{
-      const yearOnly = base.match(/(\d{4})\s*년/);
-      if(yearOnly) result.when = yearOnly[1]+"년";
-    }
-  }
-
-  // 학년: "2~3학년", "3학년" 등
-  const gradeMatch = base.match(/(\d\s*[~\-]\s*\d|\d)\s*학년/);
-  if(gradeMatch) result.grade = gradeMatch[1].replace(/\s+/g,"")+"학년";
-
-  return result;
-}
-
-// 사용자가 이미 손으로 입력해둔 값은 덮어쓰지 않고, 비어있는 칸만 채워준다
-function applyFileNameMetaToBatchForm(filename){
-  const meta = parseFileNameMeta(filename);
-  const sourceEl = document.getElementById("batch_source");
-  const instEl = document.getElementById("batch_usageInst");
-  const whenEl = document.getElementById("batch_usageWhen");
-  const gradeEl = document.getElementById("batch_usageGrade");
-  let filled = [];
-  if(!sourceEl.value.trim() && meta.source){ sourceEl.value = meta.source; filled.push("출처"); }
-  if(!instEl.value.trim() && meta.institution){ instEl.value = meta.institution; filled.push("기관"); }
-  if(!whenEl.value.trim() && meta.when){ whenEl.value = meta.when; filled.push("시기"); }
-  if(!gradeEl.value.trim() && meta.grade){ gradeEl.value = meta.grade; filled.push("학년"); }
-  return filled;
-}
-
 async function handleExamFile(file){
   if(!file) return;
   const statusEl = document.getElementById("fileExtractStatus");
-  const filledFields = applyFileNameMetaToBatchForm(file.name);
   statusEl.textContent = "파일에서 텍스트를 추출하는 중...";
   try{
     let text = "";
@@ -1016,10 +906,7 @@ async function handleExamFile(file){
     } else { statusEl.textContent = "PDF 또는 DOCX 파일만 지원돼요."; return; }
 
     document.getElementById("batchInput").value = text;
-    const metaNote = filledFields.length
-      ? (" (파일명에서 "+filledFields.join("·")+" 자동 채움 — 위에서 확인/수정해주세요)")
-      : "";
-    statusEl.textContent = "✓ 텍스트를 추출했어요. 아래 내용을 확인하고 '분석하기'를 눌러주세요 (표/이미지 있는 문제는 별도로 확인이 필요할 수 있어요)."+metaNote;
+    statusEl.textContent = "✓ 텍스트를 추출했어요. 아래 내용을 확인하고 '분석하기'를 눌러주세요 (표/이미지 있는 문제는 별도로 확인이 필요할 수 있어요).";
   }catch(err){
     console.error(err);
     statusEl.textContent = "추출에 실패했어요: " + (err && err.message ? err.message : "알 수 없는 오류") + " (콘솔에서 자세한 내용을 확인할 수 있어요)";
@@ -1052,14 +939,13 @@ dropZone.addEventListener("drop", (e)=>{
 
 // ---------- batch modal ----------
 const overlayBatch = document.getElementById("overlayBatch");
-const TEMPLATE = "[영역] 의사소통능력\n[출처] \n[유형] 미정\n[세부유형] \n[문제] \n[지문] \n[보기]\n1) \n2) \n3) \n4) \n5) \n[정답] \n[난이도] 미정\n=====\n";
+const TEMPLATE = "[영역] 의사소통능력\n[출처] \n[문제] \n[지문] \n[보기]\n1) \n2) \n3) \n4) \n5) \n[정답] \n[난이도] 미정\n=====\n";
 let batchMode = "auto"; // "auto" | "template"
 
 document.getElementById("openBatch").addEventListener("click", ()=>{
   document.getElementById("batchInput").value="";
   document.getElementById("batchResult").innerHTML="";
   document.getElementById("batchConfirmRow").style.display="none";
-  ["batch_usageInst","batch_usageWhen","batch_usageGrade"].forEach(id=>document.getElementById(id).value="");
   overlayBatch.classList.add("open");
 });
 document.getElementById("cancelBatch").addEventListener("click", ()=>overlayBatch.classList.remove("open"));
@@ -1092,9 +978,9 @@ document.getElementById("modeTemplateBtn").addEventListener("click", ()=>{
 });
 
 function parseBlock(text){
-  const tagRe = /\[(영역|출처|유형|세부유형|문제|지문|보기|정답|난이도)\]/;
+  const tagRe = /\[(영역|출처|문제|지문|보기|정답|난이도)\]/;
   const lines = text.split("\n");
-  let cur = null; const data = {영역:"",출처:"",유형:"",세부유형:"",문제:"",지문:"",보기:"",정답:"",난이도:""};
+  let cur = null; const data = {영역:"",출처:"",문제:"",지문:"",보기:"",정답:"",난이도:""};
   lines.forEach(line=>{
     const m = line.match(tagRe);
     if(m && line.trim().startsWith("[")){
@@ -1111,8 +997,7 @@ function parseBlock(text){
   return {
     domain: data["영역"] || "의사소통능력",
     source: data["출처"], stem: data["문제"], passage: data["지문"],
-    choices, answer: data["정답"], difficulty: data["난이도"] || "미정",
-    type: data["유형"] || "미정", subType: data["세부유형"] || ""
+    choices, answer: data["정답"], difficulty: data["난이도"] || "미정"
   };
 }
 
@@ -1121,9 +1006,8 @@ function parseBlock(text){
 //  실제 보기에서만 쓰이는 동그라미 숫자만 문제 경계로 사용하므로 훨씬 안전함)
 // "의사소통능력 1~10번" 같은 영역 제목을 만나면 이후 문항의 영역을 자동 전환
 const NOISE_PATTERNS = [
-  /^직업기초능력평가$/, /NCS\s*실전모의고사/, /^혼합형/, /^학교맞춤/, /^Copyright/i,
-  /^\(계속\s*\)$/, /^\(\s*\)$/, /^-\s*끝\s*-$/, /^문제의 답을 다시/, /^문항\s*수/, /^시험시간/, /^\d+\/\d+$/,
-  /^:\s*\d+$/, /^&?PSAT$/i, /^이\s*름\s*점\s*수$/
+  /^직업기초능력평가$/, /^NCS\s*실전모의고사/, /^혼합형/, /^학교맞춤/, /^Copyright/i,
+  /^\(계속\s*\)$/, /^-\s*끝\s*-$/, /^문제의 답을 다시/, /^문항\s*수/, /^시험시간/, /^\d+\/\d+$/
 ];
 const DOMAIN_NAMES = Object.keys(DOMAIN_CODE);
 function detectDomainHeader(line){
@@ -1158,52 +1042,6 @@ function detectNeedsImage(stem, passage){
   return false;
 }
 
-// 문항에 영역 표시가 전혀 없는 "혼합형" 시험지의 경우, 문제 내용 속 키워드/패턴을 보고
-// 어느 영역일지 1차로 추측해준다 (완벽하지 않으므로 미리보기에서 언제든 직접 수정 가능).
-function guessDomain(text, fallback){
-  const t = text || "";
-  const scores = {
-    "의사소통능력": 0, "수리능력": 0, "문제해결능력": 0, "자원관리능력": 0, "기술능력": 0,
-    "자기개발능력": 0, "대인관계능력": 0, "정보능력": 0, "조직이해능력": 0, "직업윤리": 0
-  };
-
-  [/다음\s*글을\s*읽고/, /일치하지\s*않는/, /일치하는\s*것은/, /제목으로\s*적절/, /경청/, /화법/,
-   /빈칸에\s*들어갈\s*단어/, /맞춤법/, /어법/, /문서작성/, /비즈니스\s*레터/, /공지사항/, /안내문/,
-   /논리적\s*오류/, /제목의/].forEach(re=>{ if(re.test(t)) scores["의사소통능력"] += 2; });
-
-  [/다음\s*빈칸에\s*들어갈\s*수/, /확률/, /평균/, /방정식/, /증가율/, /감소율/,
-   /소금물/, /농도/, /경우의\s*수/, /단위\s*:/, /표를\s*보고/, /자료에\s*대한/].forEach(re=>{ if(re.test(t)) scores["수리능력"] += 2; });
-  const qtyMatches = (t.match(/\d+\s*(%|원|명|시간|분|초|㎝|cm|㎏|kg|km|개|점|g|ℓ|㎖|ml|배|㎧)/g)||[]).length;
-  if(qtyMatches >= 4) scores["수리능력"] += 3;
-  else if(qtyMatches >= 2) scores["수리능력"] += 2;
-
-  [/<\s*조건/, /다음\s*조건/, /명제/, /창의적\s*사고/, /비판적\s*사고/, /논리적\s*사고/, /브레인스토밍/,
-   /SWOT/i, /3C\s*분석/, /순위를\s*매기/, /추론할\s*수\s*있는/, /유추할\s*수\s*있는/, /가설\s*설정/,
-   /이슈\s*분석/, /원인을\s*분석/, /항상\s*참인/, /반드시\s*옳지/, /조건에\s*따라/,
-   /문제해결/, /문제처리/].forEach(re=>{ if(re.test(t)) scores["문제해결능력"] += 2; });
-
-  [/예산/, /인력\s*배치/, /시간관리/, /물적자원/, /최소\s*비용/, /최단\s*시간/, /작업\s*지시서/,
-   /인력을\s*배치/].forEach(re=>{ if(re.test(t)) scores["자원관리능력"] += 2; });
-
-  [/매뉴얼/, /기술\s*적용/, /장비/, /설비/, /작동법/, /고장/, /점검/].forEach(re=>{ if(re.test(t)) scores["기술능력"] += 2; });
-
-  [/자기개발/, /경력개발/, /목표\s*설정/, /자아인식/].forEach(re=>{ if(re.test(t)) scores["자기개발능력"] += 2; });
-
-  [/갈등관리/, /리더십/, /협상/, /고객\s*서비스/, /팀워크/, /동기부여/].forEach(re=>{ if(re.test(t)) scores["대인관계능력"] += 2; });
-
-  [/엑셀/, /데이터베이스/, /정보\s*수집/, /컴퓨터활용/, /스프레드시트/, /함수식/].forEach(re=>{ if(re.test(t)) scores["정보능력"] += 2; });
-
-  [/조직도/, /경영전략/, /결재/, /조직구조/, /전결/, /품의서/].forEach(re=>{ if(re.test(t)) scores["조직이해능력"] += 2; });
-
-  [/직업윤리/, /준법/, /근면/, /봉사/, /책임의식/, /정직/].forEach(re=>{ if(re.test(t)) scores["직업윤리"] += 2; });
-
-  let best = null, bestScore = 0;
-  Object.keys(scores).forEach(d=>{
-    if(scores[d] > bestScore){ bestScore = scores[d]; best = d; }
-  });
-  return best || fallback;
-}
-
 function trySplitChoices(line, startIdx){
   const marks = CIRCLED_MARKS;
   if(!line.startsWith(marks[startIdx])) return null;
@@ -1221,13 +1059,9 @@ function trySplitChoices(line, startIdx){
   return {newIdx: idx, texts};
 }
 
-function parseExamText(rawText, fallbackDomain, source, fallbackType, fallbackSubType){
-  // 일부 파일(한글/워드에서 복사한 경우)은 표준 원문자(①②③④⑤) 대신 다른 유니코드
-  // 원문자(➀➁➂➃➄)를 쓰는 경우가 있어, 파싱 전에 표준 원문자로 통일한다.
-  rawText = rawText.replace(/➀/g,"①").replace(/➁/g,"②").replace(/➂/g,"③").replace(/➃/g,"④").replace(/➄/g,"⑤");
+function parseExamText(rawText, fallbackDomain, source){
   const lines = rawText.split("\n").map(l=>l.replace(/\r$/,"").trim()).filter(l=>l);
   let currentDomain = fallbackDomain;
-  let anyDomainHeaderSeen = false;
   const items = [];
 
   let pending = [];       // lines accumulated for the current question's stem+passage (before its choices)
@@ -1239,15 +1073,13 @@ function parseExamText(rawText, fallbackDomain, source, fallbackType, fallbackSu
                           // between them) without being fooled by numbered sub-clauses inside law/regulation
                           // passages that happen to increment the same way.
 
-  // "[47~48] 다음은 ... 답하시오" 처럼 여러 문제가 하나의 지문을 공유하는 묶음 형식을 위한 상태
-  let sharedPassage = "";      // 그룹이 공유하는 지문 텍스트
-  let sharedGroupStart = null; // 그룹의 첫 문제 번호 (예: 47)
-  let sharedGroupEnd = null;   // 그룹의 마지막 문제 번호 (예: 48)
-  let collectingSharedPassage = false; // 지금 공유 지문을 모으는 중인지
-
   function numberOf(lineList){
-    for(const l of lineList){
-      const m = l.match(/^(\d{1,3})[.\)]\s*\S/);
+    // Scan from the end: the question's own "N. ...?" line is almost always the line closest
+    // to where the choices begin, whereas numbered sub-lists inside a passage (steps, clauses,
+    // "1. ... 2. ... 3...") tend to appear earlier. Taking the *last* numbered line avoids
+    // locking onto one of those earlier sub-list numbers instead of the real question number.
+    for(let i=lineList.length-1;i>=0;i--){
+      const m = lineList[i].match(/^(\d{1,3})[.\)]\s*\S/);
       if(m) return parseInt(m[1],10);
     }
     return null;
@@ -1265,26 +1097,12 @@ function parseExamText(rawText, fallbackDomain, source, fallbackType, fallbackSu
         passage = bufText.slice(qIdx+1).trim();
       }
       stem = stem.replace(/^\d{1,3}[.\)]\s*/, "").trim(); // strip leading "N." question number
-      // 묶음형 문제(예: [47~48])라면, 공유 지문을 이 문제의 지문 앞에 붙인다
-      if(sharedGroupEnd!==null && sharedPassage){
-        passage = sharedPassage + (passage ? ("\n"+passage) : "");
-      }
-      // 문서 안에 영역 표시(헤더)가 한 번도 없었다면(=혼합형 시험지), 문항 내용을 보고 영역을 추측한다.
-      // 헤더가 있는 문서는 명시된 헤더 값을 그대로 신뢰한다.
-      const domain = anyDomainHeaderSeen ? currentDomain : guessDomain(stem+" "+passage, fallbackDomain);
       items.push({
-        domain, source: source || "", stem, passage,
+        domain: currentDomain, source: source || "", stem, passage,
         choices: choices.map(c=>c.trim()).filter(Boolean),
         answer: "", difficulty: "미정",
-        type: fallbackType || "미정", subType: fallbackSubType || "",
-        needsImage: detectNeedsImage(stem, passage),
-        examQuestionNumber: foundNum, // 원본 시험지에서의 문항번호 (해설 매칭용)
-        _domainGuessed: !anyDomainHeaderSeen
+        needsImage: detectNeedsImage(stem, passage)
       });
-      // 그룹의 마지막 문제까지 다 처리했으면 공유 지문 상태를 초기화한다
-      if(sharedGroupEnd!==null && foundNum!==null && foundNum>=sharedGroupEnd){
-        sharedGroupEnd = null; sharedGroupStart = null; sharedPassage = "";
-      }
     }
     pending = [];
     choices = [];
@@ -1301,52 +1119,7 @@ function parseExamText(rawText, fallbackDomain, source, fallbackType, fallbackSu
     if(domHeader){
       if(choicesComplete) finalizeQuestion();
       currentDomain = domHeader;
-      anyDomainHeaderSeen = true;
       return;
-    }
-
-    // 묶음형 지문 헤더 감지: 예) "[47~48] 다음은 ... 답하시오."
-    const groupMatch = trimmed.match(/^\[\s*(\d{1,3})\s*[~\-]\s*(\d{1,3})\s*\]\s*(.*)$/);
-    if(groupMatch){
-      if(choicesComplete) finalizeQuestion();
-      pending = []; choices = []; expectingIdx = 0; choicesComplete = false;
-      sharedGroupStart = parseInt(groupMatch[1],10);
-      sharedGroupEnd = parseInt(groupMatch[2],10);
-      collectingSharedPassage = true;
-      sharedPassage = groupMatch[3] ? groupMatch[3].trim() : "";
-      return;
-    }
-
-    // 공유 지문을 모으는 중이라면, 그룹의 시작 문제번호(예: "47.")를 만날 때까지 이 줄들을 지문으로 축적한다
-    if(collectingSharedPassage){
-      const startNumMatch = trimmed.match(/^(\d{1,3})[.\)]\s*\S/);
-      if(startNumMatch && parseInt(startNumMatch[1],10) === sharedGroupStart){
-        collectingSharedPassage = false;
-        // return하지 않고 아래 일반 로직으로 흘려보내 이 줄부터 문제 파싱을 시작하게 한다
-      } else {
-        sharedPassage += (sharedPassage?"\n":"") + trimmed;
-        return;
-      }
-    }
-
-    // 문서 맨 앞 안내문(예: "※ 다음은 NCS ... 입니다") 은 실제 문제가 아니므로,
-    // 아직 문제가 하나도 파싱 안 된 상태에서 "1." 로 시작하는 줄을 만나면
-    // 그 전까지 쌓인 안내문 텍스트는 버리고 진짜 1번 문제부터 새로 시작한다.
-    if(items.length===0 && choices.length===0){
-      const firstQMatch = trimmed.match(/^1[.\)]\s*\S/);
-      if(firstQMatch && numberOf(pending)===null){
-        pending = [];
-      }
-    }
-
-    // 법조문처럼 지문 안에 ①②③④⑤가 하위 조항 번호로 여러 번 나올 수 있다. 이미 보기를 모으는 중이거나
-    // 다 모은 상태에서 '①'이 다시 나타나면, 이전 것은 지문 내부의 오탐(하위 조항 번호)일 가능성이 높으므로
-    // 버리고 이 지점부터 새로 보기 수집을 시작한다. (실제 정답 보기는 항상 문제 맨 끝에서 ①부터 다시
-    // 시작하므로, 가장 마지막에 나오는 ①~⑤ 묶음을 취하는 것이 안전함)
-    if(trimmed.startsWith(CIRCLED_MARKS[0]) && (choicesComplete || expectingIdx>0)){
-      choices = [];
-      expectingIdx = 0;
-      choicesComplete = false;
     }
 
     // Same-page adjacent question (no page-break noise in between), e.g. paired 14-15 style questions:
@@ -1396,9 +1169,7 @@ document.getElementById("parseBatch").addEventListener("click", ()=>{
   if(batchMode === "auto"){
     const fallbackDomain = document.getElementById("batch_domain").value;
     const source = document.getElementById("batch_source").value.trim();
-    const fallbackType = document.getElementById("batch_type").value;
-    const fallbackSubType = document.getElementById("batch_subType").value.trim();
-    batchParsed = parseExamText(raw, fallbackDomain, source, fallbackType, fallbackSubType);
+    batchParsed = parseExamText(raw, fallbackDomain, source);
   } else {
     const blocks = raw.split(/^=+$/m).map(b=>b.trim()).filter(b=>b);
     batchParsed = blocks.map(parseBlock).filter(item=>item.stem);
@@ -1411,12 +1182,7 @@ document.getElementById("parseBatch").addEventListener("click", ()=>{
     return;
   }
 
-  const anyGuessed = batchParsed.some(item=>item._domainGuessed);
-  const guessNote = anyGuessed
-    ? '<div style="font-size:11.5px;color:var(--ring);background:var(--ok-bg);border-radius:8px;padding:8px 12px;margin-bottom:10px;">🔍 표시된 영역은 이 시험지에 영역 구분 표시가 없어서 문제 내용을 보고 추측한 값이에요. 틀린 항목은 아래에서 바로 고쳐주세요.</div>'
-    : '';
-
-  resBox.innerHTML = guessNote + batchParsed.map((item,i)=>{
+  resBox.innerHTML = batchParsed.map((item,i)=>{
     const newText = item.stem+" "+item.passage;
     let best={sim:0,q:null};
     allQuestions.forEach(q=>{ const sim=combinedSimilarity(newText, item.images, q); if(sim>best.sim) best={sim,q}; });
@@ -1427,70 +1193,22 @@ document.getElementById("parseBatch").addEventListener("click", ()=>{
     }
     item._dup = best.sim >= SIM_THRESHOLD;
     item._matchId = best.q ? best.q.id : null;
-    item._matchIsExisting = !!(best.q && !String(best.q.id).startsWith("(배치 내"));
     item._sim = best.sim;
     const cls = item._dup ? "dup" : "ok";
     const statusText = item._dup ? ("중복 의심 "+Math.round(best.sim*100)+"% · "+best.q.id) : "등록 가능";
     const imgWarnBadge = item.needsImage
       ? '<span style="display:inline-block;background:var(--warn-bg);color:var(--warn);font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:999px;margin-left:6px;">🖼 이미지 첨부 필요</span>'
       : "";
-    const DOMAIN_OPTIONS = Object.keys(DOMAIN_CODE);
-    const TYPE_OPTIONS = ["미정","모듈","피듈","피셋","직무"];
     return '<div class="batchItem '+cls+'" data-idx="'+i+'">'+
-      '<div class="title">'+(i+1)+'. '+item.stem.slice(0,50)+imgWarnBadge+'</div>'+
+      '<div class="title">'+(i+1)+'. ['+item.domain+'] '+item.stem.slice(0,50)+imgWarnBadge+'</div>'+
       '<div class="status">'+statusText+'</div>'+
-      '<div style="margin-top:8px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;">'+
-        '<span style="font-size:11px;color:var(--muted);flex-shrink:0;">영역'+(item._domainGuessed?' 🔍':'')+'</span>'+
-        '<select data-domainidx="'+i+'" style="font-size:11.5px;padding:5px 8px;border:1px solid var(--line);border-radius:6px;">'+
-          DOMAIN_OPTIONS.map(d=>'<option'+(d===item.domain?' selected':'')+'>'+d+'</option>').join('')+
-        '</select>'+
-        '<span style="font-size:11px;color:var(--muted);flex-shrink:0;margin-left:4px;">유형</span>'+
-        '<select data-typeidx="'+i+'" style="font-size:11.5px;padding:5px 8px;border:1px solid var(--line);border-radius:6px;">'+
-          TYPE_OPTIONS.map(t=>'<option'+(t===(item.type||"미정")?' selected':'')+'>'+t+'</option>').join('')+
-        '</select>'+
-        '<span style="font-size:11px;color:var(--muted);flex-shrink:0;margin-left:4px;">세부유형</span>'+
-        '<input type="text" data-subtypeidx="'+i+'" value="'+(item.subType||"").replace(/"/g,'&quot;')+'" placeholder="예: 응용수리" style="flex:1;min-width:110px;font-size:11.5px;padding:5px 8px;border:1px solid var(--line);border-radius:6px;">'+
-        '<span style="font-size:11px;color:var(--muted);flex-shrink:0;margin-left:4px;">원문항번호</span>'+
-        '<input type="number" data-qnumidx="'+i+'" value="'+(item.examQuestionNumber!=null?item.examQuestionNumber:"")+'" placeholder="예: 1" style="width:64px;font-size:11.5px;padding:5px 8px;border:1px solid var(--line);border-radius:6px;">'+
-      '</div>'+
       '<div style="margin-top:8px;display:flex;gap:6px;align-items:center;">'+
         '<span style="font-size:11px;color:'+(item.needsImage?'var(--warn)':'var(--muted)')+';flex-shrink:0;font-weight:'+(item.needsImage?'700':'400')+';">🖼 이미지 링크'+(item.needsImage?'(필요)':'(선택)')+'</span>'+
         '<input type="text" data-imgidx="'+i+'" placeholder="https://drive.google.com/file/d/..." style="flex:1;font-size:11.5px;padding:5px 8px;border:1px solid '+(item.needsImage?'var(--warn)':'var(--line)')+';border-radius:6px;">'+
       '</div>'+
-      (item._dup ? '<div class="batchBtns">'+
-        (item._matchIsExisting
-          ? '<button class="btn small primary" data-batchact="addusage" data-idx="'+i+'">＋ '+item._matchId+'에 사용이력만 추가</button>'
-          : '<span style="font-size:11px;color:var(--muted);align-self:center;">배치 내 다른 문항과 중복이라 이력 추가는 개별 확인이 필요해요</span>'
-        )+
-        '<button class="btn small ghost" data-batchact="force" data-idx="'+i+'">그래도 등록</button><button class="btn small ghost" data-batchact="skip" data-idx="'+i+'">건너뛰기 처리됨</button></div>' : "") +
+      (item._dup ? '<div class="batchBtns"><button class="btn small ghost" data-batchact="force" data-idx="'+i+'">그래도 등록</button><button class="btn small primary" data-batchact="skip" data-idx="'+i+'">건너뛰기 처리됨</button></div>' : "") +
       '</div>';
   }).join("");
-
-  resBox.querySelectorAll("select[data-domainidx]").forEach(sel=>{
-    sel.addEventListener("change", ()=>{
-      const idx = parseInt(sel.getAttribute("data-domainidx"),10);
-      batchParsed[idx].domain = sel.value;
-    });
-  });
-  resBox.querySelectorAll("select[data-typeidx]").forEach(sel=>{
-    sel.addEventListener("change", ()=>{
-      const idx = parseInt(sel.getAttribute("data-typeidx"),10);
-      batchParsed[idx].type = sel.value;
-    });
-  });
-  resBox.querySelectorAll("input[data-subtypeidx]").forEach(inp=>{
-    inp.addEventListener("change", ()=>{
-      const idx = parseInt(inp.getAttribute("data-subtypeidx"),10);
-      batchParsed[idx].subType = inp.value.trim();
-    });
-  });
-  resBox.querySelectorAll("input[data-qnumidx]").forEach(inp=>{
-    inp.addEventListener("change", ()=>{
-      const idx = parseInt(inp.getAttribute("data-qnumidx"),10);
-      const v = inp.value.trim();
-      batchParsed[idx].examQuestionNumber = v ? parseInt(v,10) : null;
-    });
-  });
 
   resBox.querySelectorAll("input[data-imgidx]").forEach(inp=>{
     inp.addEventListener("change", ()=>{
@@ -1500,32 +1218,10 @@ document.getElementById("parseBatch").addEventListener("click", ()=>{
   });
 
   resBox.querySelectorAll("button[data-batchact]").forEach(btn=>{
-    btn.addEventListener("click", async ()=>{
+    btn.addEventListener("click", ()=>{
       const idx = parseInt(btn.getAttribute("data-idx"),10);
-      const act = btn.getAttribute("data-batchact");
-      if(act==="force") batchParsed[idx]._forceAdd = true;
-      if(act==="skip") batchParsed[idx]._skip = true;
-      if(act==="addusage"){
-        const uInst = document.getElementById("batch_usageInst").value.trim();
-        const uWhen = document.getElementById("batch_usageWhen").value.trim();
-        const uGrade = document.getElementById("batch_usageGrade").value.trim();
-        if(!uInst && !uWhen && !uGrade){
-          alert("추가할 사용 이력(기관/시기/학년)을 위쪽 '사용 이력' 칸에 먼저 입력해주세요.");
-          return;
-        }
-        btn.disabled = true; btn.textContent = "추가 중...";
-        const ok = await addUsageToExisting(batchParsed[idx]._matchId, {institution:uInst, when:uWhen, grade:uGrade});
-        if(ok){
-          batchParsed[idx]._usageAdded = true;
-          batchParsed[idx]._skip = true; // 새 문항으로는 등록하지 않고 이력만 추가된 것으로 처리
-          btn.closest(".batchItem").style.opacity = "0.6";
-          btn.parentElement.innerHTML = '<span style="font-size:11px;color:var(--ok);font-weight:700;">✓ '+batchParsed[idx]._matchId+'에 사용이력이 추가되었습니다</span>';
-        } else {
-          btn.disabled = false; btn.textContent = "＋ "+batchParsed[idx]._matchId+"에 사용이력만 추가";
-          alert("추가에 실패했어요. 다시 시도해주세요.");
-        }
-        return;
-      }
+      if(btn.getAttribute("data-batchact")==="force") batchParsed[idx]._forceAdd = true;
+      if(btn.getAttribute("data-batchact")==="skip") batchParsed[idx]._skip = true;
       btn.closest(".batchItem").style.opacity = "0.5";
       btn.parentElement.innerHTML = '<span style="font-size:11px;color:var(--muted);">처리 완료</span>';
     });
@@ -1535,16 +1231,12 @@ document.getElementById("parseBatch").addEventListener("click", ()=>{
 });
 
 document.getElementById("registerAllOk").addEventListener("click", async ()=>{
-  const uInst = document.getElementById("batch_usageInst").value.trim();
-  const uWhen = document.getElementById("batch_usageWhen").value.trim();
-  const uGrade = document.getElementById("batch_usageGrade").value.trim();
-  const commonUsageLog = (uInst||uWhen||uGrade) ? [{institution:uInst, when:uWhen, grade:uGrade}] : [];
   let count = 0;
   for(const item of batchParsed){
-    if(item._skip) continue; // 사용이력만 추가 처리된 항목, 또는 건너뛰기 처리된 항목은 새로 등록하지 않음
+    if(item._skip) continue;
     if(item._dup && !item._forceAdd) continue;
     const hasImage = (item.images||[]).length > 0;
-    await addNew({domain:item.domain, source:item.source, stem:item.stem, passage:item.passage, choices:item.choices, answer:item.answer, difficulty:item.difficulty, type:item.type||"미정", subType:item.subType||"", images:item.images||[], usageLog: commonUsageLog, needsImage: item.needsImage && !hasImage, examQuestionNumber: (item.examQuestionNumber!==undefined ? item.examQuestionNumber : null)});
+    await addNew({domain:item.domain, source:item.source, stem:item.stem, passage:item.passage, choices:item.choices, answer:item.answer, difficulty:item.difficulty, images:item.images||[], needsImage: item.needsImage && !hasImage});
     count++;
   }
   document.getElementById("batchResult").innerHTML += '<div class="okBox">✓ 총 '+count+'개 문항이 등록되었습니다.</div>';
