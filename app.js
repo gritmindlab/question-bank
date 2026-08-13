@@ -642,7 +642,7 @@ async function handleDetailImageFiles(files){
         dataUrl = await compressImageFile(file, 800, 0.5);
       }
       images.push(buildImageHtml(dataUrl));
-      statusEl.textContent = "✓ 사진을 HTML로 변환해 추가했어요 (약 "+Math.round(dataUrl.length/1024)+"KB).";
+      statusEl.textContent = "✓ 사진을 추가했어요 (약 "+Math.round(dataUrl.length/1024)+"KB).";
     }catch(err){
       console.error(err);
       statusEl.textContent = "'"+file.name+"' 처리에 실패했어요.";
@@ -675,6 +675,19 @@ detailImageAddBox.addEventListener("drop", async (e)=>{
   detailImageAddBox.classList.remove("dragover");
   const files = e.dataTransfer.files ? Array.from(e.dataTransfer.files) : [];
   if(files.length) await handleDetailImageFiles(files);
+});
+
+document.getElementById("detailAddHtmlImage").addEventListener("click", async ()=>{
+  const input = document.getElementById("detailHtmlImageInput");
+  const code = input.value.trim();
+  if(!code) return;
+  const q = currentList[detailIdx];
+  if(!q) return;
+  const images = (q.images||[]).slice();
+  images.push(code); // 붙여넣은 HTML 코드를 그대로 저장
+  input.value = "";
+  await saveDetailPatch({ images });
+  renderImagesBox(q);
 });
 
 // 이미지 목록 + "이 문항은 그림/표가 있을 수 있어요" 경고 배너를 그려주는 공용 함수.
@@ -1011,7 +1024,7 @@ document.getElementById("f_addDataBlock").addEventListener("click", ()=>{
 
 // 이미지 항목이 "<img ...>" 완성된 HTML 코드인지, 아니면 그냥 링크(URL)인지 판별.
 // HTML이면 그대로 삽입하고, 링크면 <img src="..."> 로 감싸서 삽입한다.
-function isImageHtmlSnippet(s){ return typeof s === "string" && s.trim().startsWith("<img"); }
+function isImageHtmlSnippet(s){ return typeof s === "string" && s.trim().startsWith("<"); }
 function extractSrcFromImgHtml(html){
   const m = html.match(/src="([^"]*)"/);
   return m ? m[1] : "";
@@ -1024,7 +1037,7 @@ function renderImageEntry(entry){
 function renderImgPreview(){
   document.getElementById("f_imgPreview").innerHTML = pendingImages.map((entry,i)=>{
     const thumbSrc = isImageHtmlSnippet(entry) ? extractSrcFromImgHtml(entry) : toViewableImageUrl(entry);
-    const label = isImageHtmlSnippet(entry) ? "(첨부한 사진 · HTML로 저장됨)" : entry;
+    const label = isImageHtmlSnippet(entry) ? "(첨부한 사진)" : entry;
     return '<div style="display:flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:6px;padding:4px 8px;font-size:11px;max-width:100%;">'+
     '<img src="'+thumbSrc+'" style="width:36px;height:36px;object-fit:cover;border-radius:4px;" onerror="this.style.display=\'none\'">'+
     '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:220px;">'+label+'</span>'+
@@ -1043,6 +1056,14 @@ document.getElementById("f_addImageLink").addEventListener("click", ()=>{
   const link = input.value.trim();
   if(!link) return;
   pendingImages.push(link); // 링크로 추가한 건 순수 URL 그대로 저장 (표시할 때 <img>로 감싸짐)
+  input.value = "";
+  renderImgPreview();
+});
+document.getElementById("f_addHtmlImage").addEventListener("click", ()=>{
+  const input = document.getElementById("f_htmlImageInput");
+  const code = input.value.trim();
+  if(!code) return;
+  pendingImages.push(code); // 붙여넣은 HTML 코드를 그대로 저장 (그대로 삽입됨)
   input.value = "";
   renderImgPreview();
 });
@@ -1084,7 +1105,7 @@ document.getElementById("f_imageFileInput").addEventListener("change", async (e)
       }
       pendingImages.push(buildImageHtml(dataUrl)); // 완성된 <img> HTML을 그대로 저장
       renderImgPreview();
-      statusEl.textContent = "✓ 사진을 HTML로 변환해 추가했어요 (약 "+Math.round(dataUrl.length/1024)+"KB). 여러 장 더 첨부할 수 있어요.";
+      statusEl.textContent = "✓ 사진을 추가했어요 (약 "+Math.round(dataUrl.length/1024)+"KB). 여러 장 더 첨부할 수 있어요.";
     }catch(err){
       console.error(err);
       statusEl.textContent = "'"+file.name+"' 처리에 실패했어요.";
