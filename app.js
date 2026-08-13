@@ -626,15 +626,15 @@ function setDetailEditMode(on){
   }
 }
 
-// 상세보기 편집모드에서 이미지 파일을 첨부하면, 압축 후 완성된 <img> HTML로 변환해서
-// 바로 이 문항의 images 배열에 추가하고 Firestore에 저장한다 (모달을 열 필요 없음)
-document.getElementById("detailImageFileInput").addEventListener("change", async (e)=>{
-  const files = Array.from(e.target.files);
+// 상세보기 편집모드에서 이미지 파일을 첨부하면(선택 또는 드래그앤드롭), 압축 후 완성된
+// <img> HTML로 변환해서 바로 이 문항의 images 배열에 추가하고 Firestore에 저장한다.
+async function handleDetailImageFiles(files){
   const statusEl = document.getElementById("detailImageFileStatus");
   const q = currentList[detailIdx];
-  if(!q){ e.target.value=""; return; }
+  if(!q) return;
   const images = (q.images||[]).slice();
   for(const file of files){
+    if(!file.type || !file.type.startsWith("image/")) continue;
     statusEl.textContent = "'"+file.name+"' 압축 중...";
     try{
       let dataUrl = await compressImageFile(file, 1000, 0.7);
@@ -648,9 +648,33 @@ document.getElementById("detailImageFileInput").addEventListener("change", async
       statusEl.textContent = "'"+file.name+"' 처리에 실패했어요.";
     }
   }
-  e.target.value = "";
   await saveDetailPatch({ images });
   renderImagesBox(q);
+}
+
+document.getElementById("detailImageFileInput").addEventListener("change", async (e)=>{
+  await handleDetailImageFiles(Array.from(e.target.files));
+  e.target.value = "";
+});
+
+const detailImageAddBox = document.getElementById("detailImageAddBox");
+["dragenter","dragover"].forEach(evt=>{
+  detailImageAddBox.addEventListener(evt, (e)=>{
+    e.preventDefault(); e.stopPropagation();
+    detailImageAddBox.classList.add("dragover");
+  });
+});
+["dragleave","dragend"].forEach(evt=>{
+  detailImageAddBox.addEventListener(evt, (e)=>{
+    e.preventDefault(); e.stopPropagation();
+    detailImageAddBox.classList.remove("dragover");
+  });
+});
+detailImageAddBox.addEventListener("drop", async (e)=>{
+  e.preventDefault(); e.stopPropagation();
+  detailImageAddBox.classList.remove("dragover");
+  const files = e.dataTransfer.files ? Array.from(e.dataTransfer.files) : [];
+  if(files.length) await handleDetailImageFiles(files);
 });
 
 // 이미지 목록 + "이 문항은 그림/표가 있을 수 있어요" 경고 배너를 그려주는 공용 함수.
