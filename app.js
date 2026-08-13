@@ -563,13 +563,7 @@ function renderDetail(){
   const stemEl = document.getElementById("stemText");
   stemEl.value = q.stem||"";
   autoResize(stemEl);
-  const imgsBox = document.getElementById("imgsBox");
-  const imgList = (q.images||[]);
-  let imgsHtml = imgList.map(src=>renderImageEntry(src)).join('');
-  if(q.needsImage && imgList.length===0){
-    imgsHtml = '<div style="background:var(--warn-bg);color:var(--warn);font-weight:700;font-size:12.5px;padding:8px 12px;border-radius:8px;">⚠ 이 문항은 원본에 그림/표가 있었을 가능성이 있어요 — "편집"에서 이미지 링크를 추가해주세요.</div>' + imgsHtml;
-  }
-  imgsBox.innerHTML = imgsHtml;
+  renderImagesBox(q);
   renderChartBox(q);
   const passageBox = document.getElementById("passageBox");
   passageBox.value = q.passage||"";
@@ -656,15 +650,31 @@ document.getElementById("detailImageFileInput").addEventListener("change", async
   }
   e.target.value = "";
   await saveDetailPatch({ images });
-  // imgsBox와 표/그래프만 다시 그려서 편집 중이던 다른 입력값은 그대로 유지
+  renderImagesBox(q);
+});
+
+// 이미지 목록 + "이 문항은 그림/표가 있을 수 있어요" 경고 배너를 그려주는 공용 함수.
+// 경고가 오탐(실제로는 이미지가 필요 없는 문항)인 경우, "확인" 버튼으로 needsImage를 꺼서
+// 배너를 없앨 수 있게 한다.
+function renderImagesBox(q){
   const imgsBox = document.getElementById("imgsBox");
   const imgList = (q.images||[]);
   let imgsHtml = imgList.map(src=>renderImageEntry(src)).join('');
   if(q.needsImage && imgList.length===0){
-    imgsHtml = '<div style="background:var(--warn-bg);color:var(--warn);font-weight:700;font-size:12.5px;padding:8px 12px;border-radius:8px;">⚠ 이 문항은 원본에 그림/표가 있었을 가능성이 있어요.</div>' + imgsHtml;
+    imgsHtml = '<div style="background:var(--warn-bg);color:var(--warn);font-weight:700;font-size:12.5px;padding:8px 12px;border-radius:8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">'+
+      '<span>⚠ 이 문항은 원본에 그림/표가 있었을 가능성이 있어요 — "편집"에서 이미지를 추가해주세요.</span>'+
+      '<button type="button" id="dismissNeedsImageBtn" style="border:1px solid var(--warn);background:#fff;color:var(--warn);font-weight:700;font-size:11px;padding:4px 10px;border-radius:6px;cursor:pointer;flex-shrink:0;">✓ 확인 (이미지 필요 없음)</button>'+
+      '</div>' + imgsHtml;
   }
   imgsBox.innerHTML = imgsHtml;
-});
+  const dismissBtn = document.getElementById("dismissNeedsImageBtn");
+  if(dismissBtn){
+    dismissBtn.addEventListener("click", async ()=>{
+      await saveDetailPatch({ needsImage: false });
+      renderImagesBox(currentList[detailIdx]);
+    });
+  }
+}
 
 function setSaveStatus(txt, kind){
   const el = document.getElementById("detailSaveStatus");
