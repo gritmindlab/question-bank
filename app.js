@@ -628,6 +628,14 @@ function setDetailEditMode(on){
 
 // 상세보기 편집모드에서 이미지 파일을 첨부하면(선택 또는 드래그앤드롭), 압축 후 완성된
 // <img> HTML로 변환해서 바로 이 문항의 images 배열에 추가하고 Firestore에 저장한다.
+// Firestore 문서 하나는 1MB 제한이 있어서, 사진/HTML을 계속 추가하다 보면 어느 순간
+// 저장이 실패할 수 있다. 저장 시도 전에 대략적인 용량을 미리 계산해서 경고해준다.
+function estimateDocSize(q, extraPatch){
+  const merged = { ...q, ...extraPatch };
+  return JSON.stringify(merged).length;
+}
+const DOC_SIZE_WARN_LIMIT = 900000; // Firestore 1MB 제한보다 여유 있게 낮춰서 미리 경고
+
 async function handleDetailImageFiles(files){
   const statusEl = document.getElementById("detailImageFileStatus");
   const q = currentList[detailIdx];
@@ -641,6 +649,11 @@ async function handleDetailImageFiles(files){
       if(dataUrl.length > 700000){
         dataUrl = await compressImageFile(file, 800, 0.5);
       }
+      const candidateImages = images.concat([buildImageHtml(dataUrl)]);
+      if(estimateDocSize(q, { images: candidateImages }) > DOC_SIZE_WARN_LIMIT){
+        statusEl.textContent = "⚠ '"+file.name+"' 추가하면 이 문항 데이터가 너무 커져서(1MB 제한) 저장이 안 돼요. 기존 이미지를 먼저 삭제하거나, 더 작은 사진으로 시도해주세요.";
+        continue;
+      }
       images.push(buildImageHtml(dataUrl));
       statusEl.textContent = "✓ 사진을 추가했어요 (약 "+Math.round(dataUrl.length/1024)+"KB).";
     }catch(err){
@@ -648,7 +661,11 @@ async function handleDetailImageFiles(files){
       statusEl.textContent = "'"+file.name+"' 처리에 실패했어요.";
     }
   }
-  await saveDetailPatch({ images });
+  const ok = await saveDetailPatch({ images });
+  if(!ok){
+    statusEl.textContent = "⚠ 저장에 실패했어요 (이미지 용량이 너무 클 수 있어요). 기존 이미지를 정리한 뒤 다시 시도해주세요.";
+    return;
+  }
   renderImagesBox(q);
 }
 
@@ -679,14 +696,25 @@ detailImageAddBox.addEventListener("drop", async (e)=>{
 
 document.getElementById("detailAddHtmlImage").addEventListener("click", async ()=>{
   const input = document.getElementById("detailHtmlImageInput");
+  const statusEl = document.getElementById("detailImageFileStatus");
   const code = input.value.trim();
   if(!code) return;
   const q = currentList[detailIdx];
   if(!q) return;
   const images = (q.images||[]).slice();
+  const candidateImages = images.concat([code]);
+  if(estimateDocSize(q, { images: candidateImages }) > DOC_SIZE_WARN_LIMIT){
+    statusEl.textContent = "⚠ 이 코드를 추가하면 문항 데이터가 너무 커져서(1MB 제한) 저장이 안 돼요. 기존 이미지를 먼저 삭제해주세요.";
+    return;
+  }
   images.push(code); // 붙여넣은 HTML 코드를 그대로 저장
   input.value = "";
-  await saveDetailPatch({ images });
+  const ok = await saveDetailPatch({ images });
+  if(!ok){
+    statusEl.textContent = "⚠ 저장에 실패했어요 (문항 데이터 용량이 너무 클 수 있어요). 기존 이미지를 정리한 뒤 다시 시도해주세요.";
+    return;
+  }
+  statusEl.textContent = "✓ HTML 코드를 추가했어요.";
   renderImagesBox(q);
 });
 
@@ -696,7 +724,12 @@ document.getElementById("detailAddHtmlImage").addEventListener("click", async ()
 function renderImagesBox(q){
   const imgsBox = document.getElementById("imgsBox");
   const imgList = (q.images||[]);
-  let imgsHtml = imgList.map(src=>renderImageEntry(src)).join('');
+  let imgsHtml = imgList.map((src,i)=>
+    '<div style="position:relative;display:inline-block;">'+
+      renderImageEntry(src)+
+      '<button type="button" data-delimg="'+i+'" title="이 이미지 삭제" style="position:absolute;top:-8px;right:-8px;width:24px;height:24px;border-radius:50%;border:2px solid #fff;background:var(--danger);color:#fff;font-weight:700;font-size:14px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 4px rgba(0,0,0,.25);">×</button>'+
+    '</div>'
+  ).join('');
   if(q.needsImage && imgList.length===0){
     imgsHtml = '<div style="background:var(--warn-bg);color:var(--warn);font-weight:700;font-size:12.5px;padding:8px 12px;border-radius:8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">'+
       '<span>⚠ 이 문항은 원본에 그림/표가 있었을 가능성이 있어요 — "편집"에서 이미지를 추가해주세요.</span>'+
@@ -711,6 +744,16 @@ function renderImagesBox(q){
       renderImagesBox(currentList[detailIdx]);
     });
   }
+  imgsBox.querySelectorAll("button[data-delimg]").forEach(btn=>{
+    btn.addEventListener("click", async ()=>{
+      if(!confirm("이 이미지를 삭제할까요?")) return;
+      const idx = parseInt(btn.getAttribute("data-delimg"),10);
+      const newImages = (currentList[detailIdx].images||[]).slice();
+      newImages.splice(idx,1);
+      const ok = await saveDetailPatch({ images: newImages });
+      if(ok) renderImagesBox(currentList[detailIdx]);
+    });
+  });
 }
 
 function setSaveStatus(txt, kind){
@@ -722,15 +765,18 @@ function setSaveStatus(txt, kind){
 
 async function saveDetailPatch(patch){
   const q = currentList[detailIdx];
-  if(!q) return;
-  Object.assign(q, patch);
+  if(!q) return false;
   setSaveStatus("저장 중…", "saving");
   try{
     await updateDoc(doc(db, QUESTIONS_COL, q.id), { ...patch, updatedAt: Date.now() });
+    Object.assign(q, patch); // Firestore 저장이 성공했을 때만 화면(로컬) 상태도 반영
     setSaveStatus("저장됨 ✓", "ok");
+    return true;
   }catch(err){
     console.error(err);
-    setSaveStatus("저장 실패 — 다시 시도해주세요", "err");
+    const sizeIssue = err && err.message && /longer than|exceeds|too large|invalid-argument/i.test(err.message);
+    setSaveStatus(sizeIssue ? "저장 실패 — 문서 용량 초과" : "저장 실패 — 다시 시도해주세요", "err");
+    return false;
   }
 }
 
@@ -1059,10 +1105,19 @@ document.getElementById("f_addImageLink").addEventListener("click", ()=>{
   input.value = "";
   renderImgPreview();
 });
+function estimatePendingImagesSize(extra){
+  return JSON.stringify(pendingImages.concat(extra?[extra]:[])).length;
+}
+
 document.getElementById("f_addHtmlImage").addEventListener("click", ()=>{
   const input = document.getElementById("f_htmlImageInput");
+  const statusEl = document.getElementById("f_imageFileStatus");
   const code = input.value.trim();
   if(!code) return;
+  if(estimatePendingImagesSize(code) > 900000){
+    statusEl.textContent = "⚠ 이 코드를 추가하면 문항 데이터가 너무 커져서(1MB 제한) 저장이 안 될 수 있어요. 기존 이미지를 먼저 지워주세요.";
+    return;
+  }
   pendingImages.push(code); // 붙여넣은 HTML 코드를 그대로 저장 (그대로 삽입됨)
   input.value = "";
   renderImgPreview();
@@ -1103,7 +1158,12 @@ document.getElementById("f_imageFileInput").addEventListener("change", async (e)
       if(dataUrl.length > 700000){
         dataUrl = await compressImageFile(file, 800, 0.5); // 여전히 크면 한 번 더 압축
       }
-      pendingImages.push(buildImageHtml(dataUrl)); // 완성된 <img> HTML을 그대로 저장
+      const candidate = buildImageHtml(dataUrl);
+      if(estimatePendingImagesSize(candidate) > 900000){
+        statusEl.textContent = "⚠ '"+file.name+"' 추가하면 문항 데이터가 너무 커져서(1MB 제한) 저장이 안 될 수 있어요. 기존 이미지를 먼저 지워주세요.";
+        continue;
+      }
+      pendingImages.push(candidate); // 완성된 <img> HTML을 그대로 저장
       renderImgPreview();
       statusEl.textContent = "✓ 사진을 추가했어요 (약 "+Math.round(dataUrl.length/1024)+"KB). 여러 장 더 첨부할 수 있어요.";
     }catch(err){
