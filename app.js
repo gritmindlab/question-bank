@@ -52,10 +52,6 @@ function combinedText(q){ return (q.stem||"")+" "+(q.passage||""); }
 function imageIdsOf(imgArr){
   return (imgArr||[]).map(u=>extractDriveId(u) || u).filter(Boolean);
 }
-// NOTE: image-based similarity was tried but removed — many legitimately different
-// questions intentionally share the same reference image/drive file (shared data table,
-// shared diagram across a question pair, etc.), so "same image" is not a reliable signal
-// of duplicate content here. Similarity is judged by text only.
 function combinedSimilarity(newText, newImages, q){
   return diceSim(newText, combinedText(q));
 }
@@ -108,8 +104,6 @@ function nextIdFor(domain){
   return code+"-"+String(maxN+1).padStart(4,"0");
 }
 
-// 구글 드라이브 공유 링크 -> <img>에서 바로 보이는 형태로 변환
-// (드라이브 파일이 "링크가 있는 모든 사용자 - 뷰어"로 공유되어 있어야 정상적으로 보임)
 function extractDriveId(url){
   const patterns = [/\/file\/d\/([a-zA-Z0-9_-]+)/, /[?&]id=([a-zA-Z0-9_-]+)/, /\/d\/([a-zA-Z0-9_-]+)/];
   for(const p of patterns){ const m = url.match(p); if(m) return m[1]; }
@@ -159,10 +153,38 @@ async function deleteQuestion(id){
   await updateDoc(doc(db, QUESTIONS_COL, id), { deleted: true, updatedAt: Date.now() });
 }
 
-// "1. 해설내용...\n2. 해설내용..." 형식의 해설 텍스트를 문항번호별로 분리한다.
+// ---------- restore answers wiped by an earlier "교체(replace)" that carried a blank answer ----------
+async function restoreAnswersFromHistory(){
+  const candidates = allQuestions.filter(q => (!q.answer || q.answer==="") && q.history && q.history.length);
+  if(candidates.length===0){
+    alert("정답이 비어있으면서 이력이 남아있는 문항이 없어요. (이미 정상이거나, 애초에 이력이 없는 경우예요)");
+    return;
+  }
+  const restorable = candidates.filter(q => q.history.some(h => h.answer && h.answer!==""));
+  if(restorable.length===0){
+    alert("정답이 빈 문항 "+candidates.length+"개를 확인했지만, 이력에도 정답이 남아있지 않아 자동 복구는 어려워요.");
+    return;
+  }
+  if(!confirm("정답이 비어있는 문항 중 "+restorable.length+"개는 이력에서 이전 정답을 찾았어요. 지금 자동으로 복구할까요?")) return;
+
+  let count = 0;
+  for(const q of restorable){
+    let recovered = null;
+    for(let i=q.history.length-1;i>=0;i--){
+      if(q.history[i].answer && q.history[i].answer!==""){ recovered = q.history[i].answer; break; }
+    }
+    if(recovered){
+      await updateDoc(doc(db, QUESTIONS_COL, q.id), { answer: recovered, updatedAt: Date.now() });
+      count++;
+    }
+  }
+  alert("✓ "+count+"개 문항의 정답을 복구했어요.");
+}
+document.getElementById("restoreAnswersBtn").addEventListener("click", restoreAnswersFromHistory);
+
 function parseExplanationText(rawText){
   const lines = (rawText||"").split("\n").map(l=>l.trim()).filter(l=>l);
-  const result = {}; // { 문항번호: 해설텍스트 }
+  const result = {};
   let curNum = null;
   let curLines = [];
   function flush(){
@@ -184,7 +206,6 @@ function parseExplanationText(rawText){
   return result;
 }
 
-// 일괄 붙여넣기에서 중복으로 판정된 문항을 새로 등록하는 대신, 기존 문항에 사용 이력만 덧붙일 때 사용
 async function addUsageToExisting(existingId, usage){
   const snap = await getDoc(doc(db, QUESTIONS_COL, existingId));
   if(!snap.exists()) return false;
@@ -217,7 +238,7 @@ document.getElementById("seedImportBtn").addEventListener("click", async ()=>{
 function renderStats(){
   const byDomain = {};
   allQuestions.forEach(q=>{ byDomain[q.domain]=(byDomain[q.domain]||0)+1; });
-  const curDomain = document.getElementById("domainFilter").value; // "" = 전체
+  const curDomain = document.getElementById("domainFilter").value;
   let html = '<button type="button" class="statchip'+(curDomain===""?" active":"")+'" data-statdom="">전체 <b>'+allQuestions.length+'</b>문항</button>';
   Object.keys(byDomain).forEach(dom=>{
     html += '<button type="button" class="statchip'+(curDomain===dom?" active":"")+'" data-statdom="'+dom+'">'+dom+' <b>'+byDomain[dom]+'</b></button>';
@@ -230,7 +251,6 @@ function renderStats(){
   domSel.innerHTML = '<option value="">영역 전체</option>' + Object.keys(DOMAIN_CODE).map(d=>'<option>'+d+'</option>').join('');
   domSel.value = cur;
 
-  // 출처(모의고사) 필터 드롭다운을 실제 존재하는 출처 값들로 채운다
   const srcSel = document.getElementById("sourceFilter");
   const curSrc = srcSel.value;
   const distinctSources = [...new Set(allQuestions.map(q=>q.source).filter(Boolean))].sort();
@@ -247,7 +267,7 @@ function renderStats(){
         detailIdx = 0;
         if(currentList.length===0){ alert("이 영역에 해당하는 문제가 없습니다."); }
         renderDetail();
-        renderStats(); // refresh active-state highlighting without full table rebuild
+        renderStats();
       } else {
         renderTable();
       }
@@ -269,8 +289,6 @@ function getFiltered(){
   if(type) list = list.filter(x=>(x.type||"미정")===type);
   if(imgNeed==="needed") list = list.filter(x=>x.needsImage && (x.images||[]).length===0);
   if(q) list = list.filter(x => (x.id+" "+x.stem+" "+(x.passage||"")+" "+(x.source||"")+" "+(x.type||"")+" "+(x.subType||"")).toLowerCase().includes(q));
-  // 출처(모의고사)로 좁혀서 볼 때는, 원본 시험지의 문항번호 순서(1,2,3...)대로 보이게 정렬해서
-  // 답안지/해설과 나란히 맞춰볼 수 있게 한다. 원문항번호가 없는 문항은 뒤로 보낸다.
   if(src){
     list.sort((a,b)=>{
       const na = a.examQuestionNumber!=null ? a.examQuestionNumber : Infinity;
@@ -284,7 +302,6 @@ function getFiltered(){
 function renderTable(){
   renderStats();
   const list = getFiltered();
-  // drop selections that are no longer in the filtered/visible set from stale ids (keep across filter changes, just prune deleted)
   const allIds = new Set(allQuestions.map(q=>q.id));
   selectedIds.forEach(id=>{ if(!allIds.has(id)) selectedIds.delete(id); });
 
@@ -405,7 +422,6 @@ function openDetailFor(id){
   showDetailView();
 }
 
-// 텍스트 영역(발문/지문/보기)을 입력 내용에 맞게 자동으로 높이 조절
 function autoResize(el){
   if(!el) return;
   el.style.height = "auto";
@@ -463,11 +479,9 @@ function renderDetail(){
   document.getElementById("prevBtn").disabled = detailIdx===0;
   document.getElementById("nextBtn").disabled = detailIdx===currentList.length-1;
   setSaveStatus("", "");
-  // 문항이 바뀔 때마다 항상 보기(읽기전용) 모드로 초기화 — 실수로 이전 문항의 편집 상태가 이어지지 않게 함
   setDetailEditMode(false);
 }
 
-// ---- 상세보기 편집모드 토글 (기본 읽기전용, "편집" 버튼을 눌러야 발문/지문/보기 수정 가능) ----
 let detailEditMode = false;
 function setDetailEditMode(on){
   detailEditMode = on;
@@ -498,7 +512,6 @@ function setDetailEditMode(on){
   }
 }
 
-// ---- 상세보기 저장 (자동저장 + 저장 버튼 + 상태표시) ----
 function setSaveStatus(txt, kind){
   const el = document.getElementById("detailSaveStatus");
   if(!el) return;
@@ -506,7 +519,6 @@ function setSaveStatus(txt, kind){
   el.style.color = kind==="ok" ? "var(--ok)" : (kind==="err" ? "var(--danger)" : "var(--muted)");
 }
 
-// 로컬 객체(currentList)를 먼저 갱신한 뒤 Firestore에 저장 → 다음/이전으로 넘어가도 저장한 값이 그대로 보임
 async function saveDetailPatch(patch){
   const q = currentList[detailIdx];
   if(!q) return;
@@ -521,7 +533,6 @@ async function saveDetailPatch(patch){
   }
 }
 
-// 입력칸 값 중 저장된 값과 다른 것만 저장 (다음/이전/목록으로 넘어가기 직전 호출)
 async function flushDetailEdits(){
   if(document.getElementById("detailView").style.display === "none") return;
   const q = currentList[detailIdx];
@@ -552,9 +563,8 @@ async function flushDetailEdits(){
   if(Object.keys(patch).length) await saveDetailPatch(patch);
 }
 
-// index.html이 옛 버전이어도 저장 버튼이 사이드카드(정답 밑)에 생기도록 보강
 function ensureDetailSaveUI(){
-  if(document.getElementById("detailSaveBtn")) return; // 이미 HTML에 있으면 그대로 사용
+  if(document.getElementById("detailSaveBtn")) return;
   const answer = document.getElementById("answerInput");
   if(!answer) return;
   const field = answer.closest(".field") || answer.parentElement;
@@ -590,19 +600,15 @@ document.getElementById("examNumInput").addEventListener("change", (e)=>{
   saveDetailPatch({ examQuestionNumber: v ? parseInt(v,10) : null });
 });
 
-// 발문(문제) 직접 수정 — 입력할 때마다 높이 자동조절, 포커스를 벗어나면(change) 저장
 document.getElementById("stemText").addEventListener("input", (e)=> autoResize(e.target));
 document.getElementById("stemText").addEventListener("change", (e)=> saveDetailPatch({ stem: e.target.value.trim() }));
 
-// 지문/자료 직접 수정 (비어 있던 문항에 새로 지문을 추가하는 것도 가능)
 document.getElementById("passageBox").addEventListener("input", (e)=> autoResize(e.target));
 document.getElementById("passageBox").addEventListener("change", (e)=> saveDetailPatch({ passage: e.target.value.trim() }));
 
-// 해설 직접 수정
 document.getElementById("explanationBox").addEventListener("input", (e)=> autoResize(e.target));
 document.getElementById("explanationBox").addEventListener("change", (e)=> saveDetailPatch({ explanation: e.target.value.trim() }));
 
-// 보기(①~⑤) 직접 수정 — textarea들이 detail 렌더링마다 새로 생성되므로 목록(ul)에 이벤트 위임
 document.getElementById("choicesList").addEventListener("input", (e)=>{
   if(e.target.tagName==="TEXTAREA") autoResize(e.target);
 });
@@ -615,7 +621,6 @@ document.getElementById("choicesList").addEventListener("change", (e)=>{
   saveDetailPatch({ choices });
 });
 
-// "편집" 버튼: 누르면 발문/지문/보기가 수정 가능해짐. 다시 누르면("편집 완료") 변경분을 저장하고 읽기전용으로 되돌아감
 document.getElementById("detailEditToggle").addEventListener("click", async ()=>{
   if(detailEditMode){
     await flushDetailEdits();
@@ -686,7 +691,7 @@ const overlayExplain = document.getElementById("overlayExplain");
 document.getElementById("openExplain").addEventListener("click", ()=>{
   const distinctSources = [...new Set(allQuestions.map(q=>q.source).filter(Boolean))].sort();
   const sel = document.getElementById("explain_source");
-  const curFilterSrc = document.getElementById("sourceFilter").value; // 목록에서 이미 출처를 골라뒀다면 기본 선택으로
+  const curFilterSrc = document.getElementById("sourceFilter").value;
   sel.innerHTML = distinctSources.map(s=>'<option'+(s===curFilterSrc?' selected':'')+'>'+s+'</option>').join('');
   document.getElementById("explainInput").value = "";
   document.getElementById("explainResult").innerHTML = "";
@@ -899,14 +904,11 @@ async function extractPdfText(file){
     const page = await pdf.getPage(i);
     const content = await page.getTextContent();
 
-    // pdf.js gives a flat list of text fragments with position info but no line breaks.
-    // Reconstruct lines by grouping fragments that share roughly the same Y position,
-    // then order lines top-to-bottom and fragments within a line left-to-right.
     const items = content.items
       .filter(it => it.str !== undefined)
       .map(it => ({ str: it.str, x: it.transform[4], y: it.transform[5] }));
 
-    items.sort((a,b) => (b.y - a.y) || (a.x - b.x)); // top-to-bottom, then left-to-right
+    items.sort((a,b) => (b.y - a.y) || (a.x - b.x));
 
     const lines = [];
     let curLine = [];
@@ -940,22 +942,14 @@ async function extractDocxText(file){
   return result.value;
 }
 
-// 파일명에서 사용이력(기관·시기·학년)과 출처를 추측해서 뽑아낸다.
-// 예: "2026년 3월 29일 포항제철공업고등학교 2~3학년 70제.pdf"
-//     -> 기관: 포항제철공업고등학교 / 시기: 2026년 3월 29일 / 학년: 2~3학년
-// "~학교/~대학교"로 안 끝나는 줄임말 기관명(한신대, 조선대 등)도 파일명에서 잡히도록 별도 목록으로 보강
 const KNOWN_INSTITUTION_ALIASES = [
   "한신대","국민대","조선대","서울과기대","수도전기공업고등학교","수도공고","경기영상과학고"
 ];
 
 function parseFileNameMeta(filename){
-  const base = (filename||"").replace(/\.[^.]+$/, "").trim(); // 확장자 제거
+  const base = (filename||"").replace(/\.[^.]+$/, "").trim();
   const result = { institution:"", when:"", grade:"", source: base };
 
-  // 기관명: 자주 쓰는 줄임말 목록(한신대, 서울과기대 등)을 먼저 확인하고,
-  // 없으면 ...초등학교/중학교/고등학교/대학교/대학/전문대학로 끝나는 덩어리를 찾는다.
-  // (목록을 먼저 보는 이유: "서울과기대 조형대학"처럼 뒤에 학과명이 붙으면 일반 규칙이
-  //  "조형대학"을 기관명으로 잘못 잡는 경우가 있어서, 실제 협력기관명을 우선함)
   const aliasHits = KNOWN_INSTITUTION_ALIASES.filter(name=>base.includes(name));
   if(aliasHits.length){
     result.institution = aliasHits.sort((a,b)=>b.length-a.length)[0];
@@ -964,7 +958,6 @@ function parseFileNameMeta(filename){
     if(instMatch) result.institution = instMatch[0];
   }
 
-  // 날짜: "2026년 3월 29일" 형식을 우선 찾고, 없으면 "2026년 1학기" 같은 학기 표기를 찾음
   const dateMatch = base.match(/(\d{4})\s*년\s*(\d{1,2})\s*월\s*(\d{1,2})\s*일/);
   if(dateMatch){
     result.when = dateMatch[1]+"년 "+dateMatch[2]+"월 "+dateMatch[3]+"일";
@@ -977,14 +970,12 @@ function parseFileNameMeta(filename){
     }
   }
 
-  // 학년: "2~3학년", "3학년" 등
   const gradeMatch = base.match(/(\d\s*[~\-]\s*\d|\d)\s*학년/);
   if(gradeMatch) result.grade = gradeMatch[1].replace(/\s+/g,"")+"학년";
 
   return result;
 }
 
-// 사용자가 이미 손으로 입력해둔 값은 덮어쓰지 않고, 비어있는 칸만 채워준다
 function applyFileNameMetaToBatchForm(filename){
   const meta = parseFileNameMeta(filename);
   const sourceEl = document.getElementById("batch_source");
@@ -1053,7 +1044,7 @@ dropZone.addEventListener("drop", (e)=>{
 // ---------- batch modal ----------
 const overlayBatch = document.getElementById("overlayBatch");
 const TEMPLATE = "[영역] 의사소통능력\n[출처] \n[유형] 미정\n[세부유형] \n[문제] \n[지문] \n[보기]\n1) \n2) \n3) \n4) \n5) \n[정답] \n[난이도] 미정\n=====\n";
-let batchMode = "auto"; // "auto" | "template"
+let batchMode = "auto";
 
 document.getElementById("openBatch").addEventListener("click", ()=>{
   document.getElementById("batchInput").value="";
@@ -1116,10 +1107,6 @@ function parseBlock(text){
   };
 }
 
-// 시험지 형식 자동인식: ①②③④⑤가 순서대로 5개 나오는 지점을 "문제 끝"으로 판단.
-// (지문 속 법조문/공문서에 나오는 일반 숫자 "1. 2. 3."은 건드리지 않고,
-//  실제 보기에서만 쓰이는 동그라미 숫자만 문제 경계로 사용하므로 훨씬 안전함)
-// "의사소통능력 1~10번" 같은 영역 제목을 만나면 이후 문항의 영역을 자동 전환
 const NOISE_PATTERNS = [
   /^직업기초능력평가$/, /NCS\s*실전모의고사/, /^혼합형/, /^학교맞춤/, /^Copyright/i,
   /^\(계속\s*\)$/, /^\(\s*\)$/, /^-\s*끝\s*-$/, /^문제의 답을 다시/, /^문항\s*수/, /^시험시간/, /^\d+\/\d+$/,
@@ -1138,13 +1125,6 @@ function isNoise(line){ return NOISE_PATTERNS.some(re=>re.test(line.trim())); }
 const CIRCLED_MARKS = ["①","②","③","④","⑤"];
 const CIRCLED_SPLIT_RE = /([①②③④⑤])/;
 
-// Handles both "one choice per line" and "all five choices packed onto one line"
-// (e.g. "① A, D ② A, E ③ A, F ④ D, E ⑤ D, F"), which happens when the options are short.
-// Returns {newIdx, texts} if `line` starts with the mark we're currently expecting, else null.
-// 이미지/표/그림이 필요할 가능성이 있는 문항을 자동으로 감지.
-// (1) "그림", "사진", "배치도" 등 명시적 키워드가 있는 경우
-// (2) "<자료 제목>" 같은 캡션은 있는데 캡션 뒤에 실제 표 데이터가 거의 없는 경우
-//     (원본 PDF에서 표/차트가 이미지로 삽입되어 텍스트 추출이 안 된 경우가 많음)
 const IMAGE_KEYWORDS = ["그림", "사진", "도표", "배치도", "구성도", "회로도", "도면", "이미지"];
 function detectNeedsImage(stem, passage){
   const combined = (stem||"") + " " + (passage||"");
@@ -1153,13 +1133,11 @@ function detectNeedsImage(stem, passage){
   if(captionMatch){
     const lastCaption = captionMatch[captionMatch.length-1];
     const afterCaption = passage.slice(passage.lastIndexOf(lastCaption) + lastCaption.length).trim();
-    if(afterCaption.length < 40) return true; // caption present but almost no data after it
+    if(afterCaption.length < 40) return true;
   }
   return false;
 }
 
-// 문항에 영역 표시가 전혀 없는 "혼합형" 시험지의 경우, 문제 내용 속 키워드/패턴을 보고
-// 어느 영역일지 1차로 추측해준다 (완벽하지 않으므로 미리보기에서 언제든 직접 수정 가능).
 function guessDomain(text, fallback){
   const t = text || "";
   const scores = {
@@ -1222,28 +1200,22 @@ function trySplitChoices(line, startIdx){
 }
 
 function parseExamText(rawText, fallbackDomain, source, fallbackType, fallbackSubType){
-  // 일부 파일(한글/워드에서 복사한 경우)은 표준 원문자(①②③④⑤) 대신 다른 유니코드
-  // 원문자(➀➁➂➃➄)를 쓰는 경우가 있어, 파싱 전에 표준 원문자로 통일한다.
   rawText = rawText.replace(/➀/g,"①").replace(/➁/g,"②").replace(/➂/g,"③").replace(/➃/g,"④").replace(/➄/g,"⑤");
   const lines = rawText.split("\n").map(l=>l.replace(/\r$/,"").trim()).filter(l=>l);
   let currentDomain = fallbackDomain;
   let anyDomainHeaderSeen = false;
   const items = [];
 
-  let pending = [];       // lines accumulated for the current question's stem+passage (before its choices)
-  let choices = [];       // choice texts collected so far for the current question
-  let expectingIdx = 0;   // index (0~4) into CIRCLED_MARKS of the next choice marker we need to see
-  let choicesComplete = false; // true once all 5 circled choices have been seen (may still be mid-wrap)
-  let lastQNum = null;    // question number of the most recently finalized question, used to sanity-check
-                          // same-page adjacent questions (e.g. paired 14-15 questions with no page break
-                          // between them) without being fooled by numbered sub-clauses inside law/regulation
-                          // passages that happen to increment the same way.
+  let pending = [];
+  let choices = [];
+  let expectingIdx = 0;
+  let choicesComplete = false;
+  let lastQNum = null;
 
-  // "[47~48] 다음은 ... 답하시오" 처럼 여러 문제가 하나의 지문을 공유하는 묶음 형식을 위한 상태
-  let sharedPassage = "";      // 그룹이 공유하는 지문 텍스트
-  let sharedGroupStart = null; // 그룹의 첫 문제 번호 (예: 47)
-  let sharedGroupEnd = null;   // 그룹의 마지막 문제 번호 (예: 48)
-  let collectingSharedPassage = false; // 지금 공유 지문을 모으는 중인지
+  let sharedPassage = "";
+  let sharedGroupStart = null;
+  let sharedGroupEnd = null;
+  let collectingSharedPassage = false;
 
   function numberOf(lineList){
     for(const l of lineList){
@@ -1264,13 +1236,10 @@ function parseExamText(rawText, fallbackDomain, source, fallbackType, fallbackSu
         stem = bufText.slice(0, qIdx+1).trim();
         passage = bufText.slice(qIdx+1).trim();
       }
-      stem = stem.replace(/^\d{1,3}[.\)]\s*/, "").trim(); // strip leading "N." question number
-      // 묶음형 문제(예: [47~48])라면, 공유 지문을 이 문제의 지문 앞에 붙인다
+      stem = stem.replace(/^\d{1,3}[.\)]\s*/, "").trim();
       if(sharedGroupEnd!==null && sharedPassage){
         passage = sharedPassage + (passage ? ("\n"+passage) : "");
       }
-      // 문서 안에 영역 표시(헤더)가 한 번도 없었다면(=혼합형 시험지), 문항 내용을 보고 영역을 추측한다.
-      // 헤더가 있는 문서는 명시된 헤더 값을 그대로 신뢰한다.
       const domain = anyDomainHeaderSeen ? currentDomain : guessDomain(stem+" "+passage, fallbackDomain);
       items.push({
         domain, source: source || "", stem, passage,
@@ -1278,10 +1247,9 @@ function parseExamText(rawText, fallbackDomain, source, fallbackType, fallbackSu
         answer: "", difficulty: "미정",
         type: fallbackType || "미정", subType: fallbackSubType || "",
         needsImage: detectNeedsImage(stem, passage),
-        examQuestionNumber: foundNum, // 원본 시험지에서의 문항번호 (해설 매칭용)
+        examQuestionNumber: foundNum,
         _domainGuessed: !anyDomainHeaderSeen
       });
-      // 그룹의 마지막 문제까지 다 처리했으면 공유 지문 상태를 초기화한다
       if(sharedGroupEnd!==null && foundNum!==null && foundNum>=sharedGroupEnd){
         sharedGroupEnd = null; sharedGroupStart = null; sharedPassage = "";
       }
@@ -1295,7 +1263,7 @@ function parseExamText(rawText, fallbackDomain, source, fallbackType, fallbackSu
   lines.forEach(trimmed=>{
     if(isNoise(trimmed)){
       if(choicesComplete) finalizeQuestion();
-      return; // noise lines are never kept as content
+      return;
     }
     const domHeader = detectDomainHeader(trimmed);
     if(domHeader){
@@ -1305,7 +1273,6 @@ function parseExamText(rawText, fallbackDomain, source, fallbackType, fallbackSu
       return;
     }
 
-    // 묶음형 지문 헤더 감지: 예) "[47~48] 다음은 ... 답하시오."
     const groupMatch = trimmed.match(/^\[\s*(\d{1,3})\s*[~\-]\s*(\d{1,3})\s*\]\s*(.*)$/);
     if(groupMatch){
       if(choicesComplete) finalizeQuestion();
@@ -1317,21 +1284,16 @@ function parseExamText(rawText, fallbackDomain, source, fallbackType, fallbackSu
       return;
     }
 
-    // 공유 지문을 모으는 중이라면, 그룹의 시작 문제번호(예: "47.")를 만날 때까지 이 줄들을 지문으로 축적한다
     if(collectingSharedPassage){
       const startNumMatch = trimmed.match(/^(\d{1,3})[.\)]\s*\S/);
       if(startNumMatch && parseInt(startNumMatch[1],10) === sharedGroupStart){
         collectingSharedPassage = false;
-        // return하지 않고 아래 일반 로직으로 흘려보내 이 줄부터 문제 파싱을 시작하게 한다
       } else {
         sharedPassage += (sharedPassage?"\n":"") + trimmed;
         return;
       }
     }
 
-    // 문서 맨 앞 안내문(예: "※ 다음은 NCS ... 입니다") 은 실제 문제가 아니므로,
-    // 아직 문제가 하나도 파싱 안 된 상태에서 "1." 로 시작하는 줄을 만나면
-    // 그 전까지 쌓인 안내문 텍스트는 버리고 진짜 1번 문제부터 새로 시작한다.
     if(items.length===0 && choices.length===0){
       const firstQMatch = trimmed.match(/^1[.\)]\s*\S/);
       if(firstQMatch && numberOf(pending)===null){
@@ -1339,21 +1301,12 @@ function parseExamText(rawText, fallbackDomain, source, fallbackType, fallbackSu
       }
     }
 
-    // 법조문처럼 지문 안에 ①②③④⑤가 하위 조항 번호로 여러 번 나올 수 있다. 이미 보기를 모으는 중이거나
-    // 다 모은 상태에서 '①'이 다시 나타나면, 이전 것은 지문 내부의 오탐(하위 조항 번호)일 가능성이 높으므로
-    // 버리고 이 지점부터 새로 보기 수집을 시작한다. (실제 정답 보기는 항상 문제 맨 끝에서 ①부터 다시
-    // 시작하므로, 가장 마지막에 나오는 ①~⑤ 묶음을 취하는 것이 안전함)
     if(trimmed.startsWith(CIRCLED_MARKS[0]) && (choicesComplete || expectingIdx>0)){
       choices = [];
       expectingIdx = 0;
       choicesComplete = false;
     }
 
-    // Same-page adjacent question (no page-break noise in between), e.g. paired 14-15 style questions:
-    // only trust a numbered line as a genuine new-question boundary if its number is exactly one more
-    // than the question currently being accumulated (or, failing that, one more than the last finalized
-    // question) — this avoids being fooled by numbered sub-clauses inside law/regulation passages, which
-    // essentially never happen to hit that exact number.
     if(choicesComplete){
       const m = trimmed.match(/^(\d{1,3})[.\)]\s*\S/);
       if(m){
@@ -1372,13 +1325,9 @@ function parseExamText(rawText, fallbackDomain, source, fallbackType, fallbackSu
     if(splitResult && splitResult.texts.length>0){
       splitResult.texts.forEach(t=>choices.push(t));
       expectingIdx = splitResult.newIdx;
-      if(expectingIdx === CIRCLED_MARKS.length) choicesComplete = true; // wait for a page-break/header before finalizing
+      if(expectingIdx === CIRCLED_MARKS.length) choicesComplete = true;
       return;
     }
-    // a line that isn't the next expected marker: either mid-choice wrap text, or trailing wrap
-    // text after the 5th choice, or (for a handful of law/regulation-citing questions) leftover
-    // clause text that reused circled numerals — in all these cases it safely belongs with the
-    // most recently collected choice rather than starting a new question.
     if(choices.length>0 && (choicesComplete || (expectingIdx>0 && expectingIdx<CIRCLED_MARKS.length))){
       choices[choices.length-1] += " " + trimmed;
       return;
@@ -1517,7 +1466,7 @@ document.getElementById("parseBatch").addEventListener("click", ()=>{
         const ok = await addUsageToExisting(batchParsed[idx]._matchId, {institution:uInst, when:uWhen, grade:uGrade});
         if(ok){
           batchParsed[idx]._usageAdded = true;
-          batchParsed[idx]._skip = true; // 새 문항으로는 등록하지 않고 이력만 추가된 것으로 처리
+          batchParsed[idx]._skip = true;
           btn.closest(".batchItem").style.opacity = "0.6";
           btn.parentElement.innerHTML = '<span style="font-size:11px;color:var(--ok);font-weight:700;">✓ '+batchParsed[idx]._matchId+'에 사용이력이 추가되었습니다</span>';
         } else {
@@ -1541,7 +1490,7 @@ document.getElementById("registerAllOk").addEventListener("click", async ()=>{
   const commonUsageLog = (uInst||uWhen||uGrade) ? [{institution:uInst, when:uWhen, grade:uGrade}] : [];
   let count = 0;
   for(const item of batchParsed){
-    if(item._skip) continue; // 사용이력만 추가 처리된 항목, 또는 건너뛰기 처리된 항목은 새로 등록하지 않음
+    if(item._skip) continue;
     if(item._dup && !item._forceAdd) continue;
     const hasImage = (item.images||[]).length > 0;
     await addNew({domain:item.domain, source:item.source, stem:item.stem, passage:item.passage, choices:item.choices, answer:item.answer, difficulty:item.difficulty, type:item.type||"미정", subType:item.subType||"", images:item.images||[], usageLog: commonUsageLog, needsImage: item.needsImage && !hasImage, examQuestionNumber: (item.examQuestionNumber!==undefined ? item.examQuestionNumber : null)});
