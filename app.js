@@ -115,12 +115,157 @@ function toViewableImageUrl(url){
   return url;
 }
 
+// ---- table/chart data (comma or tab separated, first row = header) ----
+function parseGridData(raw){
+  const lines = (raw||"").trim().split("\n").map(l=>l.trim()).filter(l=>l);
+  if(lines.length===0) return null;
+  const rows = lines.map(l => l.split(/\t|,/).map(c=>c.trim()));
+  return rows; // rows[0] = header
+}
+
+// 표 데이터를 넣으면, CBT에서 쓰는 것과 같은 스타일(남색 헤더/테두리/가운데정렬)의
+// <style>+<table> HTML을 그대로 생성한다. 렌더링에 쓰는 동시에 "코드 복사" 버튼으로
+// CBT 등 다른 곳에 그대로 붙여넣을 수 있게 원본 코드 문자열도 함께 돌려준다.
+function generateTableHtml(header, dataRows, uid){
+  const cls = "ncsTable_" + uid.replace(/[^a-zA-Z0-9]/g, "");
+  const nl2br = s => (s||"").replace(/\\n/g, "<br>");
+  const css =
+`<style>
+  .${cls} {
+    width:100%;
+    table-layout:fixed;
+    border-collapse:collapse;
+    color:#111;
+    font-size:15px;
+    line-height:1.5;
+  }
+  .${cls} th,
+  .${cls} td {
+    padding:13px 8px;
+    border:1px solid #777;
+    text-align:center;
+    vertical-align:middle;
+    white-space:normal !important;
+    word-break:keep-all;
+  }
+  .${cls} thead th {
+    background:#082d57 !important;
+    color:#fff !important;
+    font-weight:700;
+  }
+  .${cls} tbody td:first-child {
+    font-weight:700;
+  }
+  @media (max-width:700px) {
+    .${cls} { font-size:12px; }
+    .${cls} th, .${cls} td { padding:9px 4px; }
+  }
+</style>`;
+  const theadRow = "      " + header.map(h=>"<th>"+nl2br(h)+"</th>").join("\n      ");
+  const tbodyRows = dataRows.map(r =>
+    "    <tr>\n      " + r.map(c=>"<td>"+nl2br(c)+"</td>").join("\n      ") + "\n    </tr>"
+  ).join("\n");
+  const table =
+`<table class="${cls}">
+  <thead>
+    <tr>
+${theadRow}
+    </tr>
+  </thead>
+  <tbody>
+${tbodyRows}
+  </tbody>
+</table>`;
+  return css + "\n" + table;
+}
+
+function addCopyButton(wrap, htmlCode){
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.textContent = "코드 복사";
+  btn.style.cssText = "margin-top:6px;font-size:11px;padding:5px 10px;border-radius:6px;border:1px solid var(--line);background:#F1F3F8;color:var(--muted);cursor:pointer;";
+  btn.addEventListener("click", ()=>{
+    navigator.clipboard.writeText(htmlCode).then(()=>{
+      btn.textContent = "복사됨 ✓";
+      setTimeout(()=>{ btn.textContent = "코드 복사"; }, 1500);
+    });
+  });
+  wrap.appendChild(btn);
+}
+
+const PALETTE = ["#4C5FD5","#1F9A8D","#D98E2A","#C1546B","#6B5CA5","#3E8FB0","#B0703E","#5C8A3E"];
+
+let activeChartInstances = [];
+function renderChartBox(q){
+  const box = document.getElementById("chartBox");
+  if(!box) return;
+  activeChartInstances.forEach(c=>c.destroy());
+  activeChartInstances = [];
+  box.innerHTML = "";
+
+  const blocks = q.dataBlocks && q.dataBlocks.length ? q.dataBlocks : [];
+  if(!blocks.length) return;
+
+  blocks.forEach((block, idx)=>{
+    const rows = parseGridData(block.raw);
+    if(!rows || rows.length < 2) return;
+    const header = rows[0];
+    const dataRows = rows.slice(1);
+    const titleHtml = block.title ? '<div class="dataTitle">'+block.title+'</div>' : "";
+    const wrap = document.createElement("div");
+    wrap.style.marginBottom = "16px";
+    box.appendChild(wrap);
+
+    if(block.type === "table"){
+      const tableCode = generateTableHtml(header, dataRows, q.id+"_"+idx);
+      wrap.innerHTML = titleHtml + tableCode;
+      addCopyButton(wrap, tableCode);
+      return;
+    }
+
+    if(!window.Chart) return;
+    const canvasId = "chartCanvas_"+idx;
+
+    if(block.type === "pie"){
+      const labels = dataRows.map(r=>r[0]);
+      const values = dataRows.map(r=>parseFloat(r[1]) || 0);
+      wrap.innerHTML = titleHtml + '<div class="chartWrap"><canvas id="'+canvasId+'" height="220"></canvas></div>';
+      const ctx = document.getElementById(canvasId).getContext("2d");
+      activeChartInstances.push(new Chart(ctx, {
+        type: "pie",
+        data: { labels, datasets: [{ data: values, backgroundColor: labels.map((_,i)=>PALETTE[i%PALETTE.length]) }] },
+        options: { responsive:true, plugins:{ legend:{ display:true, position:"right" } } }
+      }));
+      return;
+    }
+
+    if(block.type === "bar" || block.type === "line"){
+      const categories = dataRows.map(r=>r[0]);
+      const seriesNames = header.slice(1);
+      const datasets = seriesNames.map((name,i)=>({
+        label: name,
+        data: dataRows.map(r=>parseFloat(r[i+1]) || 0),
+        backgroundColor: PALETTE[i%PALETTE.length],
+        borderColor: PALETTE[i%PALETTE.length],
+        fill: false
+      }));
+      wrap.innerHTML = titleHtml + '<div class="chartWrap"><canvas id="'+canvasId+'" height="220"></canvas></div>';
+      const ctx = document.getElementById(canvasId).getContext("2d");
+      activeChartInstances.push(new Chart(ctx, {
+        type: block.type,
+        data: { labels: categories, datasets },
+        options: { responsive:true, plugins:{ legend:{ display: seriesNames.length>1 } } }
+      }));
+    }
+  });
+}
+
 async function addNew(form){
   const id = nextIdFor(form.domain);
   const docData = {
     id, domain: form.domain, stem: form.stem, passage: form.passage,
     choices: form.choices, source: form.source || "그릿마인드랩 자체 제작",
-    images: form.images||[], usageLog: form.usageLog||[],
+    images: form.images||[], usageLog: form.usageLog||[], dataBlocks: form.dataBlocks||[],
     answer: form.answer, difficulty: form.difficulty, type: form.type || "미정", subType: form.subType || "",
     needsImage: !!form.needsImage,
     examQuestionNumber: (form.examQuestionNumber===undefined ? null : form.examQuestionNumber),
@@ -142,7 +287,7 @@ async function applyReplace(id, form){
   });
   await updateDoc(doc(db, QUESTIONS_COL, id), {
     stem: form.stem, passage: form.passage, choices: form.choices,
-    source: form.source || prev.source, images: form.images||[],
+    source: form.source || prev.source, images: form.images||[], dataBlocks: form.dataBlocks||[],
     usageLog: form.usageLog||[],
     answer: form.answer, difficulty: form.difficulty, type: form.type, subType: form.subType,
     version: (prev.version||1)+1, history, updatedAt: Date.now()
@@ -152,35 +297,6 @@ async function applyReplace(id, form){
 async function deleteQuestion(id){
   await updateDoc(doc(db, QUESTIONS_COL, id), { deleted: true, updatedAt: Date.now() });
 }
-
-// ---------- restore answers wiped by an earlier "교체(replace)" that carried a blank answer ----------
-async function restoreAnswersFromHistory(){
-  const candidates = allQuestions.filter(q => (!q.answer || q.answer==="") && q.history && q.history.length);
-  if(candidates.length===0){
-    alert("정답이 비어있으면서 이력이 남아있는 문항이 없어요. (이미 정상이거나, 애초에 이력이 없는 경우예요)");
-    return;
-  }
-  const restorable = candidates.filter(q => q.history.some(h => h.answer && h.answer!==""));
-  if(restorable.length===0){
-    alert("정답이 빈 문항 "+candidates.length+"개를 확인했지만, 이력에도 정답이 남아있지 않아 자동 복구는 어려워요.");
-    return;
-  }
-  if(!confirm("정답이 비어있는 문항 중 "+restorable.length+"개는 이력에서 이전 정답을 찾았어요. 지금 자동으로 복구할까요?")) return;
-
-  let count = 0;
-  for(const q of restorable){
-    let recovered = null;
-    for(let i=q.history.length-1;i>=0;i--){
-      if(q.history[i].answer && q.history[i].answer!==""){ recovered = q.history[i].answer; break; }
-    }
-    if(recovered){
-      await updateDoc(doc(db, QUESTIONS_COL, q.id), { answer: recovered, updatedAt: Date.now() });
-      count++;
-    }
-  }
-  alert("✓ "+count+"개 문항의 정답을 복구했어요.");
-}
-document.getElementById("restoreAnswersBtn").addEventListener("click", restoreAnswersFromHistory);
 
 function parseExplanationText(rawText){
   const lines = (rawText||"").split("\n").map(l=>l.trim()).filter(l=>l);
@@ -449,11 +565,12 @@ function renderDetail(){
   autoResize(stemEl);
   const imgsBox = document.getElementById("imgsBox");
   const imgList = (q.images||[]);
-  let imgsHtml = imgList.map(src=>'<img src="'+toViewableImageUrl(src)+'" loading="lazy">').join('');
+  let imgsHtml = imgList.map(src=>renderImageEntry(src)).join('');
   if(q.needsImage && imgList.length===0){
     imgsHtml = '<div style="background:var(--warn-bg);color:var(--warn);font-weight:700;font-size:12.5px;padding:8px 12px;border-radius:8px;">⚠ 이 문항은 원본에 그림/표가 있었을 가능성이 있어요 — "편집"에서 이미지 링크를 추가해주세요.</div>' + imgsHtml;
   }
   imgsBox.innerHTML = imgsHtml;
+  renderChartBox(q);
   const passageBox = document.getElementById("passageBox");
   passageBox.value = q.passage||"";
   autoResize(passageBox);
@@ -492,6 +609,7 @@ function setDetailEditMode(on){
   const btn = document.getElementById("detailEditToggle");
   const note = document.getElementById("editModeNote");
   const maincard = document.getElementById("maincard");
+  const imageAddBox = document.getElementById("detailImageAddBox");
   if(on){
     stemEl.removeAttribute("readonly");
     passageEl.removeAttribute("readonly");
@@ -500,6 +618,7 @@ function setDetailEditMode(on){
     if(btn){ btn.textContent = "✓ 편집 완료 (눌러서 저장)"; btn.classList.remove("outline"); btn.classList.add("primary"); }
     if(note) note.style.display = "inline-flex";
     if(maincard) maincard.classList.add("editing");
+    if(imageAddBox) imageAddBox.style.display = "block";
     stemEl.focus();
   } else {
     stemEl.setAttribute("readonly","");
@@ -509,8 +628,43 @@ function setDetailEditMode(on){
     if(btn){ btn.textContent = "✏️ 편집하기"; btn.classList.remove("primary"); btn.classList.add("outline"); }
     if(note) note.style.display = "none";
     if(maincard) maincard.classList.remove("editing");
+    if(imageAddBox) imageAddBox.style.display = "none";
   }
 }
+
+// 상세보기 편집모드에서 이미지 파일을 첨부하면, 압축 후 완성된 <img> HTML로 변환해서
+// 바로 이 문항의 images 배열에 추가하고 Firestore에 저장한다 (모달을 열 필요 없음)
+document.getElementById("detailImageFileInput").addEventListener("change", async (e)=>{
+  const files = Array.from(e.target.files);
+  const statusEl = document.getElementById("detailImageFileStatus");
+  const q = currentList[detailIdx];
+  if(!q){ e.target.value=""; return; }
+  const images = (q.images||[]).slice();
+  for(const file of files){
+    statusEl.textContent = "'"+file.name+"' 압축 중...";
+    try{
+      let dataUrl = await compressImageFile(file, 1000, 0.7);
+      if(dataUrl.length > 700000){
+        dataUrl = await compressImageFile(file, 800, 0.5);
+      }
+      images.push(buildImageHtml(dataUrl));
+      statusEl.textContent = "✓ 사진을 HTML로 변환해 추가했어요 (약 "+Math.round(dataUrl.length/1024)+"KB).";
+    }catch(err){
+      console.error(err);
+      statusEl.textContent = "'"+file.name+"' 처리에 실패했어요.";
+    }
+  }
+  e.target.value = "";
+  await saveDetailPatch({ images });
+  // imgsBox와 표/그래프만 다시 그려서 편집 중이던 다른 입력값은 그대로 유지
+  const imgsBox = document.getElementById("imgsBox");
+  const imgList = (q.images||[]);
+  let imgsHtml = imgList.map(src=>renderImageEntry(src)).join('');
+  if(q.needsImage && imgList.length===0){
+    imgsHtml = '<div style="background:var(--warn-bg);color:var(--warn);font-weight:700;font-size:12.5px;padding:8px 12px;border-radius:8px;">⚠ 이 문항은 원본에 그림/표가 있었을 가능성이 있어요.</div>' + imgsHtml;
+  }
+  imgsBox.innerHTML = imgsHtml;
+});
 
 function setSaveStatus(txt, kind){
   const el = document.getElementById("detailSaveStatus");
@@ -734,21 +888,27 @@ document.getElementById("applyExplain").addEventListener("click", async ()=>{
 const overlaySingle = document.getElementById("overlaySingle");
 let editingId = null;
 let pendingImages = [];
+let pendingDataBlocks = [];
 
 function resetSingleForm(){
-  ["f_source","f_stem","f_passage","f_answer"].forEach(id=>document.getElementById(id).value="");
+  ["f_source","f_stem","f_passage","f_answer","f_chartTitle","f_chartData"].forEach(id=>document.getElementById(id).value="");
   [1,2,3,4,5].forEach(n=>document.getElementById("f_c"+n).value="");
   document.getElementById("f_domain").value="의사소통능력";
   document.getElementById("f_difficulty").value="미정";
   document.getElementById("f_type").value="미정";
   document.getElementById("f_subType").value="";
+  document.getElementById("f_chartType").value="table";
+  document.getElementById("f_dataBlockPreview").innerHTML="";
   document.getElementById("f_imageLinkInput").value="";
+  document.getElementById("f_imageFileInput").value="";
+  document.getElementById("f_imageFileStatus").textContent="사진을 선택하면 자동으로 크기를 줄여서 문제 데이터에 바로 저장돼요. 외부 서비스나 링크가 필요 없어요.";
   document.getElementById("f_imgPreview").innerHTML="";
   ["f_usageInst","f_usageWhen","f_usageGrade"].forEach(id=>document.getElementById(id).value="");
   document.getElementById("f_usagePreview").innerHTML="";
   document.getElementById("checkResult").innerHTML="";
   pendingImages = [];
   pendingUsage = [];
+  pendingDataBlocks = [];
 }
 document.getElementById("openSingle").addEventListener("click", ()=>{
   editingId=null;
@@ -769,7 +929,13 @@ function openEditFor(id){
   document.getElementById("f_difficulty").value = q.difficulty||"미정";
   document.getElementById("f_type").value = q.type||"미정";
   document.getElementById("f_subType").value = q.subType||"";
+  document.getElementById("f_chartType").value = "table";
+  document.getElementById("f_chartTitle").value = "";
+  document.getElementById("f_chartData").value = "";
+  pendingDataBlocks = (q.dataBlocks||[]).slice();
+  renderDataBlockPreview();
   document.getElementById("f_imageLinkInput").value="";
+  document.getElementById("f_imageFileInput").value="";
   pendingImages = (q.images||[]).slice();
   renderImgPreview();
   ["f_usageInst","f_usageWhen","f_usageGrade"].forEach(id=>document.getElementById(id).value="");
@@ -782,14 +948,55 @@ document.getElementById("cancelSingle").addEventListener("click", ()=>overlaySin
 document.getElementById("closeXSingle").addEventListener("click", ()=>overlaySingle.classList.remove("open"));
 overlaySingle.addEventListener("click", e=>{ if(e.target===overlaySingle) overlaySingle.classList.remove("open"); });
 
-function renderImgPreview(){
-  document.getElementById("f_imgPreview").innerHTML = pendingImages.map((link,i)=>
-    '<div style="display:flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:6px;padding:4px 8px;font-size:11px;max-width:100%;">'+
-    '<img src="'+toViewableImageUrl(link)+'" style="width:36px;height:36px;object-fit:cover;border-radius:4px;" onerror="this.style.display=\'none\'">'+
-    '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:220px;">'+link+'</span>'+
-    '<button type="button" data-rm="'+i+'" style="border:none;background:none;cursor:pointer;color:var(--danger);font-weight:700;">×</button>'+
+const DATA_TYPE_LABEL = {table:"표", bar:"막대그래프", line:"꺾은선그래프", pie:"원형그래프"};
+function renderDataBlockPreview(){
+  document.getElementById("f_dataBlockPreview").innerHTML = pendingDataBlocks.map((b,i)=>
+    '<div style="display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:6px;padding:6px 10px;font-size:12px;">'+
+    '<span style="font-weight:700;">'+ DATA_TYPE_LABEL[b.type] +'</span>'+
+    '<span style="color:var(--muted);">'+ (b.title || "(제목 없음)") +'</span>'+
+    '<button type="button" data-rmD="'+i+'" style="margin-left:auto;border:none;background:none;cursor:pointer;color:var(--danger);font-weight:700;">×</button>'+
     '</div>'
   ).join('');
+  document.getElementById("f_dataBlockPreview").querySelectorAll("button[data-rmD]").forEach(btn=>{
+    btn.addEventListener("click", ()=>{
+      pendingDataBlocks.splice(parseInt(btn.getAttribute("data-rmD"),10), 1);
+      renderDataBlockPreview();
+    });
+  });
+}
+document.getElementById("f_addDataBlock").addEventListener("click", ()=>{
+  const type = document.getElementById("f_chartType").value;
+  const title = document.getElementById("f_chartTitle").value.trim();
+  const raw = document.getElementById("f_chartData").value;
+  if(!raw.trim()) return;
+  pendingDataBlocks.push({type, title, raw});
+  document.getElementById("f_chartTitle").value = "";
+  document.getElementById("f_chartData").value = "";
+  renderDataBlockPreview();
+});
+
+// 이미지 항목이 "<img ...>" 완성된 HTML 코드인지, 아니면 그냥 링크(URL)인지 판별.
+// HTML이면 그대로 삽입하고, 링크면 <img src="..."> 로 감싸서 삽입한다.
+function isImageHtmlSnippet(s){ return typeof s === "string" && s.trim().startsWith("<img"); }
+function extractSrcFromImgHtml(html){
+  const m = html.match(/src="([^"]*)"/);
+  return m ? m[1] : "";
+}
+function renderImageEntry(entry){
+  if(isImageHtmlSnippet(entry)) return entry; // 이미 완성된 <img> HTML → 그대로 사용
+  return '<img src="'+toViewableImageUrl(entry)+'" loading="lazy">';
+}
+
+function renderImgPreview(){
+  document.getElementById("f_imgPreview").innerHTML = pendingImages.map((entry,i)=>{
+    const thumbSrc = isImageHtmlSnippet(entry) ? extractSrcFromImgHtml(entry) : toViewableImageUrl(entry);
+    const label = isImageHtmlSnippet(entry) ? "(첨부한 사진 · HTML로 저장됨)" : entry;
+    return '<div style="display:flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:6px;padding:4px 8px;font-size:11px;max-width:100%;">'+
+    '<img src="'+thumbSrc+'" style="width:36px;height:36px;object-fit:cover;border-radius:4px;" onerror="this.style.display=\'none\'">'+
+    '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:220px;">'+label+'</span>'+
+    '<button type="button" data-rm="'+i+'" style="border:none;background:none;cursor:pointer;color:var(--danger);font-weight:700;">×</button>'+
+    '</div>';
+  }).join('');
   document.getElementById("f_imgPreview").querySelectorAll("button[data-rm]").forEach(btn=>{
     btn.addEventListener("click", ()=>{
       pendingImages.splice(parseInt(btn.getAttribute("data-rm"),10), 1);
@@ -801,9 +1008,55 @@ document.getElementById("f_addImageLink").addEventListener("click", ()=>{
   const input = document.getElementById("f_imageLinkInput");
   const link = input.value.trim();
   if(!link) return;
-  pendingImages.push(link);
+  pendingImages.push(link); // 링크로 추가한 건 순수 URL 그대로 저장 (표시할 때 <img>로 감싸짐)
   input.value = "";
   renderImgPreview();
+});
+
+// 파일을 캔버스로 리사이즈+압축한 뒤, 완성된 <img> HTML 태그로 만들어 그 HTML 자체를 저장한다
+// (별도 파일 저장소 없이 Firestore 문서 안에 "이미지가 이미 삽입된 HTML"로 들어감)
+function compressImageFile(file, maxWidth=1000, quality=0.7){
+  return new Promise((resolve, reject)=>{
+    const reader = new FileReader();
+    reader.onload = (e)=>{
+      const img = new Image();
+      img.onload = ()=>{
+        let w = img.width, h = img.height;
+        if(w > maxWidth){ h = Math.round(h * maxWidth / w); w = maxWidth; }
+        const canvas = document.createElement("canvas");
+        canvas.width = w; canvas.height = h;
+        canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL("image/jpeg", quality));
+      };
+      img.onerror = reject;
+      img.src = e.target.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+function buildImageHtml(dataUrl){
+  return '<img src="'+dataUrl+'" style="max-width:100%;height:auto;border-radius:8px;border:1px solid #ddd;">';
+}
+document.getElementById("f_imageFileInput").addEventListener("change", async (e)=>{
+  const files = Array.from(e.target.files);
+  const statusEl = document.getElementById("f_imageFileStatus");
+  for(const file of files){
+    statusEl.textContent = "'"+file.name+"' 압축 중...";
+    try{
+      let dataUrl = await compressImageFile(file, 1000, 0.7);
+      if(dataUrl.length > 700000){
+        dataUrl = await compressImageFile(file, 800, 0.5); // 여전히 크면 한 번 더 압축
+      }
+      pendingImages.push(buildImageHtml(dataUrl)); // 완성된 <img> HTML을 그대로 저장
+      renderImgPreview();
+      statusEl.textContent = "✓ 사진을 HTML로 변환해 추가했어요 (약 "+Math.round(dataUrl.length/1024)+"KB). 여러 장 더 첨부할 수 있어요.";
+    }catch(err){
+      console.error(err);
+      statusEl.textContent = "'"+file.name+"' 처리에 실패했어요.";
+    }
+  }
+  e.target.value = "";
 });
 
 let pendingUsage = [];
@@ -845,7 +1098,8 @@ function readForm(){
     type: document.getElementById("f_type").value,
     subType: document.getElementById("f_subType").value.trim(),
     images: pendingImages.slice(),
-    usageLog: pendingUsage.slice()
+    usageLog: pendingUsage.slice(),
+    dataBlocks: pendingDataBlocks.slice()
   };
 }
 
