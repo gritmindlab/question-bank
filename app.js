@@ -741,12 +741,17 @@ function renderImagesBox(q){
     else customEntries.push({src, idx:i});
   });
 
-  const delBtn = (idx) => detailEditMode
-    ? '<button type="button" data-delimg="'+idx+'" title="이 이미지 삭제" style="position:absolute;top:-8px;right:-8px;width:24px;height:24px;border-radius:50%;border:2px solid #fff;background:var(--danger);color:#fff;font-weight:700;font-size:14px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 4px rgba(0,0,0,.25);">×</button>'
+  const delBtnAbs = (idx) => detailEditMode
+    ? '<button type="button" data-delimg="'+idx+'" title="이 이미지 삭제" style="position:absolute;top:-6px;right:-6px;width:20px;height:20px;border-radius:50%;border:2px solid #fff;background:var(--danger);color:#fff;font-weight:700;font-size:12px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 4px rgba(0,0,0,.25);">×</button>'
+    : '';
+  // 커스텀 HTML 블록은 폭이 넓거나 높이가 제각각이라, 절대위치로 겹쳐 놓으면 엉뚱한 위치(화면 우측
+  // 상단)로 떨어져 보이는 문제가 있었다. 대신 블록 바로 위에 작은 인라인 버튼으로 붙인다.
+  const delBtnInline = (idx) => detailEditMode
+    ? '<button type="button" data-delimg="'+idx+'" style="font-size:11px;padding:3px 9px;border-radius:6px;border:1px solid var(--danger);background:var(--danger-bg);color:var(--danger);font-weight:700;cursor:pointer;margin-bottom:6px;">× 이 항목 삭제</button><br>'
     : '';
 
   let imgsHtml = photoEntries.map(({src,idx})=>
-    '<div style="position:relative;display:inline-block;">'+ renderImageEntry(src) + delBtn(idx) + '</div>'
+    '<div style="position:relative;display:inline-block;">'+ renderImageEntry(src) + delBtnAbs(idx) + '</div>'
   ).join('');
 
   if(q.needsImage && imgList.length===0){
@@ -758,7 +763,7 @@ function renderImagesBox(q){
   imgsBox.innerHTML = imgsHtml;
 
   customBox.innerHTML = customEntries.map(({src,idx})=>
-    '<div class="customHtmlItem">'+ src + delBtn(idx) + '</div>'
+    '<div class="customHtmlItem">'+ delBtnInline(idx) + src + '</div>'
   ).join('');
 
   const dismissBtn = document.getElementById("dismissNeedsImageBtn");
