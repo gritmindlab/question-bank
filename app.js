@@ -624,6 +624,7 @@ function setDetailEditMode(on){
     if(maincard) maincard.classList.remove("editing");
     if(imageAddBox) imageAddBox.style.display = "none";
   }
+  if(currentList[detailIdx]) renderImagesBox(currentList[detailIdx]);
 }
 
 // 상세보기 편집모드에서 이미지 파일을 첨부하면(선택 또는 드래그앤드롭), 압축 후 완성된
@@ -721,15 +722,33 @@ document.getElementById("detailAddHtmlImage").addEventListener("click", async ()
 // 이미지 목록 + "이 문항은 그림/표가 있을 수 있어요" 경고 배너를 그려주는 공용 함수.
 // 경고가 오탐(실제로는 이미지가 필요 없는 문항)인 경우, "확인" 버튼으로 needsImage를 꺼서
 // 배너를 없앨 수 있게 한다.
+// 자동 압축으로 등록된 단순 사진(<img ...> 한 줄)만 "사진"으로 보고 가운데 정렬 그룹에 넣는다.
+// <style>, <div>, <table> 등이 섞인 커스텀 HTML 코드는 원래 레이아웃이 깨지지 않도록
+// 별도 영역에 전체 너비/왼쪽 정렬로 표시한다.
+function isSimplePhotoEntry(entry){
+  return typeof entry === "string" && entry.trim().toLowerCase().startsWith("<img");
+}
+
 function renderImagesBox(q){
   const imgsBox = document.getElementById("imgsBox");
+  const customBox = document.getElementById("customImgHtmlBox");
   const imgList = (q.images||[]);
-  let imgsHtml = imgList.map((src,i)=>
-    '<div style="position:relative;display:inline-block;">'+
-      renderImageEntry(src)+
-      '<button type="button" data-delimg="'+i+'" title="이 이미지 삭제" style="position:absolute;top:-8px;right:-8px;width:24px;height:24px;border-radius:50%;border:2px solid #fff;background:var(--danger);color:#fff;font-weight:700;font-size:14px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 4px rgba(0,0,0,.25);">×</button>'+
-    '</div>'
+
+  const photoEntries = [];   // {src, idx}
+  const customEntries = [];  // {src, idx}
+  imgList.forEach((src,i)=>{
+    if(isSimplePhotoEntry(src)) photoEntries.push({src, idx:i});
+    else customEntries.push({src, idx:i});
+  });
+
+  const delBtn = (idx) => detailEditMode
+    ? '<button type="button" data-delimg="'+idx+'" title="이 이미지 삭제" style="position:absolute;top:-8px;right:-8px;width:24px;height:24px;border-radius:50%;border:2px solid #fff;background:var(--danger);color:#fff;font-weight:700;font-size:14px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 4px rgba(0,0,0,.25);">×</button>'
+    : '';
+
+  let imgsHtml = photoEntries.map(({src,idx})=>
+    '<div style="position:relative;display:inline-block;">'+ renderImageEntry(src) + delBtn(idx) + '</div>'
   ).join('');
+
   if(q.needsImage && imgList.length===0){
     imgsHtml = '<div style="background:var(--warn-bg);color:var(--warn);font-weight:700;font-size:12.5px;padding:8px 12px;border-radius:8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">'+
       '<span>⚠ 이 문항은 원본에 그림/표가 있었을 가능성이 있어요 — "편집"에서 이미지를 추가해주세요.</span>'+
@@ -737,6 +756,11 @@ function renderImagesBox(q){
       '</div>' + imgsHtml;
   }
   imgsBox.innerHTML = imgsHtml;
+
+  customBox.innerHTML = customEntries.map(({src,idx})=>
+    '<div class="customHtmlItem">'+ src + delBtn(idx) + '</div>'
+  ).join('');
+
   const dismissBtn = document.getElementById("dismissNeedsImageBtn");
   if(dismissBtn){
     dismissBtn.addEventListener("click", async ()=>{
@@ -744,14 +768,16 @@ function renderImagesBox(q){
       renderImagesBox(currentList[detailIdx]);
     });
   }
-  imgsBox.querySelectorAll("button[data-delimg]").forEach(btn=>{
-    btn.addEventListener("click", async ()=>{
-      if(!confirm("이 이미지를 삭제할까요?")) return;
-      const idx = parseInt(btn.getAttribute("data-delimg"),10);
-      const newImages = (currentList[detailIdx].images||[]).slice();
-      newImages.splice(idx,1);
-      const ok = await saveDetailPatch({ images: newImages });
-      if(ok) renderImagesBox(currentList[detailIdx]);
+  [imgsBox, customBox].forEach(container=>{
+    container.querySelectorAll("button[data-delimg]").forEach(btn=>{
+      btn.addEventListener("click", async ()=>{
+        if(!confirm("이 이미지를 삭제할까요?")) return;
+        const idx = parseInt(btn.getAttribute("data-delimg"),10);
+        const newImages = (currentList[detailIdx].images||[]).slice();
+        newImages.splice(idx,1);
+        const ok = await saveDetailPatch({ images: newImages });
+        if(ok) renderImagesBox(currentList[detailIdx]);
+      });
     });
   });
 }
