@@ -104,6 +104,22 @@ function nextIdFor(domain){
   return code+"-"+String(maxN+1).padStart(4,"0");
 }
 
+// 문항의 영역을 바꿔도 ID 앞자리(영역 코드)는 처음 만들어질 때 값 그대로 남아있는다.
+// (Firestore는 문서 ID를 그 자리에서 바로 못 바꾸기 때문에, 새 ID로 문서를 새로 만들고
+//  기존 데이터를 그대로 옮긴 뒤, 예전 ID는 삭제 처리하는 방식으로 "재발급"한다.)
+function idMatchesDomain(q){
+  const code = DOMAIN_CODE[q.domain];
+  return code && q.id.startsWith(code+"-");
+}
+async function reassignQuestionId(q){
+  const newId = nextIdFor(q.domain);
+  const newData = { ...q, id: newId, updatedAt: Date.now() };
+  delete newData.deleted;
+  await setDoc(doc(db, QUESTIONS_COL, newId), { ...newData, deleted:false });
+  await updateDoc(doc(db, QUESTIONS_COL, q.id), { deleted: true, updatedAt: Date.now() });
+  return newId;
+}
+
 function extractDriveId(url){
   const patterns = [/\/file\/d\/([a-zA-Z0-9_-]+)/, /[?&]id=([a-zA-Z0-9_-]+)/, /\/d\/([a-zA-Z0-9_-]+)/];
   for(const p of patterns){ const m = url.match(p); if(m) return m[1]; }
@@ -277,21 +293,51 @@ async function addNew(form){
   return id;
 }
 
-async function applyReplace(id, form){
+function normalizeForCompare(s){ return (s||"").replace(/\s+/g,"").trim(); }
+// 내용이 실제로 달라진 게 있는지 확인한다 (공백 차이는 무시).
+// 정답/난이도/유형처럼 부가정보만 바뀐 건 여기서 보지 않고, "문제 자체"(발문/지문/보기/정답)만 비교한다.
+function isSameQuestionContent(form, prev){
+  if(normalizeForCompare(form.stem) !== normalizeForCompare(prev.stem)) return false;
+  if(normalizeForCompare(form.passage) !== normalizeForCompare(prev.passage)) return false;
+  const fc = (form.choices||[]).map(normalizeForCompare).join("|");
+  const pc = (prev.choices||[]).map(normalizeForCompare).join("|");
+  if(fc !== pc) return false;
+  if(normalizeForCompare(form.answer) !== normalizeForCompare(prev.answer||"")) return false;
+  return true;
+}
+
+// id 문항을 form 내용으로 덮어쓴다. 내용이 실제로(발문/지문/보기/정답 기준) 달라졌을 때만
+// 버전을 올리고 이전 내용을 이력에 남긴다 — 완전히 같은 내용을 다시 등록한 경우(예: 같은 문제를
+// 다른 출처/사용이력으로만 추가한 경우)에는 버전이 그대로 유지된다.
+// 반환값 { versioned: true/false } 로 호출부에서 적절한 안내 메시지를 보여줄 수 있다.
+// id 문항을 form 내용으로 덮어쓴다.
+// forceVersion이 지정되면(true/false) 그 값을 그대로 따르고, 지정하지 않으면(undefined)
+// 내용이 실제로(발문/지문/보기/정답 기준) 달라졌는지 자동으로 비교해서 판단한다.
+async function applyReplace(id, form, forceVersion){
   const prevSnap = await getDoc(doc(db, QUESTIONS_COL, id));
   const prev = prevSnap.data();
-  const history = prev.history || [];
-  history.push({
-    stem:prev.stem, passage:prev.passage, choices:prev.choices, answer:prev.answer,
-    difficulty:prev.difficulty, type:prev.type, subType:prev.subType, images:prev.images, replacedAt: Date.now()
-  });
-  await updateDoc(doc(db, QUESTIONS_COL, id), {
+  const versioned = (forceVersion !== undefined) ? forceVersion : !isSameQuestionContent(form, prev);
+
+  const patch = {
     stem: form.stem, passage: form.passage, choices: form.choices,
     source: form.source || prev.source, images: form.images||[], dataBlocks: form.dataBlocks||[],
     usageLog: form.usageLog||[],
     answer: form.answer, difficulty: form.difficulty, type: form.type, subType: form.subType,
-    version: (prev.version||1)+1, history, updatedAt: Date.now()
-  });
+    updatedAt: Date.now()
+  };
+
+  if(versioned){
+    const history = prev.history || [];
+    history.push({
+      stem:prev.stem, passage:prev.passage, choices:prev.choices, answer:prev.answer,
+      difficulty:prev.difficulty, type:prev.type, subType:prev.subType, images:prev.images, replacedAt: Date.now()
+    });
+    patch.version = (prev.version||1)+1;
+    patch.history = history;
+  }
+
+  await updateDoc(doc(db, QUESTIONS_COL, id), patch);
+  return { versioned };
 }
 
 async function deleteQuestion(id){
@@ -350,31 +396,6 @@ document.getElementById("seedImportBtn").addEventListener("click", async ()=>{
   alert(count + "개 문항을 가져왔습니다.");
 });
 
-// PDF 추출 과정에서 흔히 남는 "이상한 흔적"을 감지한다.
-// 대표적으로 괄호 안 삽입어(예: "서(동)쪽")가 원래 자리에서 떨어져 나가면서
-// 빈 괄호 "( )"만 문장 뒤에 남는 패턴이 자주 생긴다.
-function detectTextIssue(stem, passage){
-  const combined = (stem||"") + " " + (passage||"");
-  if(/\(\s{0,2}\)/.test(combined)) return true;      // 빈 괄호 또는 괄호 안에 공백만
-  if(/[가-힣]\s[가-힣]\s쪽/.test(combined)) return true; // "서 동 쪽"처럼 글자 사이가 떨어진 패턴
-  return false;
-}
-
-document.getElementById("textIssueScanBtn").addEventListener("click", async ()=>{
-  if(!confirm("등록된 전체 문항의 텍스트를 훑어서, 빈 괄호 같은 이상 흔적이 있는 문항을 찾아 표시할까요?")) return;
-  let found = 0;
-  for(const q of allQuestions){
-    if(q.needsReview) continue; // 이미 표시된 건 건너뜀
-    if(detectTextIssue(q.stem, q.passage)){
-      await updateDoc(doc(db, QUESTIONS_COL, q.id), { needsReview: true, updatedAt: Date.now() });
-      found++;
-    }
-  }
-  alert(found>0
-    ? "✓ "+found+"개 문항에서 이상 흔적을 발견해 표시했어요. 목록에서 '⚠ 정제 필요만' 필터로 모아보실 수 있어요."
-    : "이상 흔적이 발견된 문항이 없어요.");
-});
-
 // ---------- rendering (table / detail) ----------
 function renderStats(){
   const byDomain = {};
@@ -430,14 +451,12 @@ function getFiltered(){
   const diff = document.getElementById("diffFilter").value;
   const type = document.getElementById("typeFilter").value;
   const imgNeed = document.getElementById("imgNeedFilter").value;
-  const reviewNeed = document.getElementById("reviewNeedFilter").value;
   let list = allQuestions.slice();
   if(dom) list = list.filter(x=>x.domain===dom);
   if(src) list = list.filter(x=>x.source===src);
   if(diff) list = list.filter(x=>(x.difficulty||"미정")===diff);
   if(type) list = list.filter(x=>(x.type||"미정")===type);
   if(imgNeed==="needed") list = list.filter(x=>x.needsImage && (x.images||[]).length===0);
-  if(reviewNeed==="needed") list = list.filter(x=>x.needsReview);
   if(q) list = list.filter(x => (x.id+" "+x.stem+" "+(x.passage||"")+" "+(x.source||"")+" "+(x.type||"")+" "+(x.subType||"")).toLowerCase().includes(q));
   if(src){
     list.sort((a,b)=>{
@@ -474,7 +493,7 @@ function renderTable(){
       '<td><span class="domchip" style="color:'+col.c+';background:'+col.bg+'">'+q.domain+'</span></td>'+
       '<td>'+ (q.type||"미정") +'</td>'+
       '<td style="font-size:12px;color:var(--muted);">'+ (q.subType||"-") +'</td>'+
-      '<td class="stemcell" title="'+ (q.stem||"").replace(/"/g,'&quot;') +'">'+(q.needsReview?'<span style="color:var(--warn);font-weight:700;margin-right:4px;" title="이상 텍스트 의심">⚠</span>':'')+stemShort+'</td>'+
+      '<td class="stemcell" title="'+ (q.stem||"").replace(/"/g,'&quot;') +'">'+stemShort+'</td>'+
       '<td>'+ (q.difficulty||"미정") +'</td>'+
       '<td class="idcell">'+ (q.answer||"-") +'</td>'+
       '<td style="font-size:11.5px;color:var(--muted);">'+ (q.source||"-") +'</td>'+
@@ -587,6 +606,7 @@ function renderDetail(){
   const chip = document.getElementById("domainChip");
   chip.textContent=q.domain; chip.style.color=col.c; chip.style.background=col.bg;
   document.getElementById("qid").textContent=q.id;
+  document.getElementById("idMismatchBox").style.display = idMatchesDomain(q) ? "none" : "block";
   document.getElementById("domainSelect").value = q.domain;
   document.getElementById("qsource").textContent=q.source||"-";
   const usageBox = document.getElementById("qUsageList");
@@ -638,6 +658,7 @@ function setDetailEditMode(on){
   const note = document.getElementById("editModeNote");
   const maincard = document.getElementById("maincard");
   const imageAddBox = document.getElementById("detailImageAddBox");
+  const manualReplaceBox = document.getElementById("detailManualReplaceBox");
   if(on){
     stemEl.removeAttribute("readonly");
     passageEl.removeAttribute("readonly");
@@ -647,6 +668,12 @@ function setDetailEditMode(on){
     if(note) note.style.display = "inline-flex";
     if(maincard) maincard.classList.add("editing");
     if(imageAddBox) imageAddBox.style.display = "block";
+    if(manualReplaceBox){
+      manualReplaceBox.style.display = "block";
+      const q = currentList[detailIdx];
+      const selfIdEl = document.getElementById("detailManualReplaceSelfId");
+      if(q && selfIdEl) selfIdEl.textContent = q.id;
+    }
     stemEl.focus();
   } else {
     stemEl.setAttribute("readonly","");
@@ -657,6 +684,7 @@ function setDetailEditMode(on){
     if(note) note.style.display = "none";
     if(maincard) maincard.classList.remove("editing");
     if(imageAddBox) imageAddBox.style.display = "none";
+    if(manualReplaceBox) manualReplaceBox.style.display = "none";
   }
   if(currentList[detailIdx]) renderImagesBox(currentList[detailIdx]);
 }
@@ -874,6 +902,52 @@ async function flushDetailEdits(){
   if(choices.length && JSON.stringify(choices) !== JSON.stringify(q.choices||[])) patch.choices = choices;
   if(Object.keys(patch).length) await saveDetailPatch(patch);
 }
+
+// 상세보기 편집모드에서 지금 입력창에 있는 값(저장 여부와 무관)을 그대로 읽어 form 객체로 만든다.
+// "다른 문항 ID로 복사 등록" 버튼에서 사용 — 지금 화면에 보이는 편집 내용을 다른 문항에 덮어쓸 때 쓴다.
+function readCurrentDetailAsForm(){
+  const q = currentList[detailIdx];
+  return {
+    domain: document.getElementById("domainSelect").value,
+    source: q ? (q.source||"") : "",
+    stem: document.getElementById("stemText").value.trim(),
+    passage: document.getElementById("passageBox").value.trim(),
+    choices: Array.from(document.getElementById("choicesList").querySelectorAll("textarea")).map(ta=>ta.value.trim()),
+    answer: document.getElementById("answerInput").value.trim(),
+    difficulty: document.getElementById("diffSelect").value,
+    type: document.getElementById("typeSelect").value,
+    subType: document.getElementById("subTypeInput").value.trim(),
+    images: q ? (q.images||[]) : []
+  };
+}
+async function runDetailManualReplace(forceVersion){
+  const targetId = document.getElementById("detailManualReplaceId").value.trim();
+  const q = currentList[detailIdx];
+  if(!q) return;
+  if(!targetId){ alert("교체할 기존 문항 ID를 입력해주세요."); return; }
+  if(targetId === q.id){ alert("지금 보고 있는 문항과 같은 ID예요. 다른 ID를 지정해주세요."); return; }
+  const existing = allQuestions.find(x=>x.id===targetId);
+  if(!existing){ alert("'"+targetId+"' ID를 가진 문항을 찾을 수 없어요. 정확한 ID인지 확인해주세요."); return; }
+  if(!confirm(targetId+(forceVersion ? " 문항을 새 버전으로 교체할까요?" : " 문항에 동일 문제로 반영할까요? (버전 유지)")+" ("+q.id+"는 그대로 남아있어요)")) return;
+  const form = readCurrentDetailAsForm();
+  const result = await applyReplace(targetId, form, forceVersion);
+  alert(result.versioned
+    ? "✓ "+targetId+" 문항을 새 버전으로 교체했어요."
+    : "✓ "+targetId+" 문항에 동일 문제로 반영했어요. (버전 유지)");
+  document.getElementById("detailManualReplaceId").value = "";
+}
+document.getElementById("detailManualReplaceSameBtn").addEventListener("click", ()=>runDetailManualReplace(false));
+document.getElementById("detailManualReplaceVersionBtn").addEventListener("click", ()=>runDetailManualReplace(true));
+
+document.getElementById("reassignIdBtn").addEventListener("click", async ()=>{
+  const q = currentList[detailIdx];
+  if(!q) return;
+  const newId = nextIdFor(q.domain);
+  if(!confirm("이 문항의 ID를 "+q.id+" → "+newId+" (으)로 바꿀까요?\n\n※ ID가 바뀌는 것뿐이고 내용(발문/보기/정답/이력 등)은 그대로 옮겨져요.\n※ 다른 곳에서 이 ID(" + q.id + ")를 참조하고 있었다면(예: 해설 매칭용 원문항번호는 영향 없음) 그 부분은 따로 확인이 필요해요.")) return;
+  await reassignQuestionId(q);
+  alert("✓ "+newId+"(으)로 재발급했어요.");
+  document.getElementById("viewListBtn").click();
+});
 
 function ensureDetailSaveUI(){
   if(document.getElementById("detailSaveBtn")) return;
@@ -1283,7 +1357,7 @@ function readForm(){
   };
 }
 
-document.getElementById("f_manualReplaceBtn").addEventListener("click", async ()=>{
+async function runManualReplace(forceVersion){
   const targetId = document.getElementById("f_manualReplaceId").value.trim();
   const resBox = document.getElementById("checkResult"); resBox.innerHTML="";
   if(!targetId){ resBox.innerHTML='<div class="dupBox"><b>교체할 기존 문항 ID를 입력해주세요.</b></div>'; return; }
@@ -1291,10 +1365,14 @@ document.getElementById("f_manualReplaceBtn").addEventListener("click", async ()
   if(!existing){ resBox.innerHTML='<div class="dupBox"><b>\''+targetId+'\' ID를 가진 문항을 찾을 수 없어요.</b> 정확한 ID인지 확인해주세요.</div>'; return; }
   const form = readForm();
   if(!form.stem){ resBox.innerHTML='<div class="dupBox"><b>문제(발문)를 입력해 주세요.</b></div>'; return; }
-  await applyReplace(targetId, form);
-  resBox.innerHTML = '<div class="okBox">✓ '+targetId+' 문항을 이 내용으로 교체했어요. (이전 내용은 이력에 보관됩니다)</div>';
+  const result = await applyReplace(targetId, form, forceVersion);
+  resBox.innerHTML = result.versioned
+    ? '<div class="okBox">✓ '+targetId+' 문항을 새 버전으로 교체했어요. (이전 내용은 이력에 보관됩니다)</div>'
+    : '<div class="okBox">✓ '+targetId+' 문항에 동일 문제로 반영했어요. (버전은 그대로예요)</div>';
   setTimeout(()=>overlaySingle.classList.remove("open"), 800);
-});
+}
+document.getElementById("f_manualReplaceSameBtn").addEventListener("click", ()=>runManualReplace(false));
+document.getElementById("f_manualReplaceVersionBtn").addEventListener("click", ()=>runManualReplace(true));
 
 document.getElementById("checkAndUpload").addEventListener("click", async ()=>{
   const form = readForm();
@@ -1302,8 +1380,10 @@ document.getElementById("checkAndUpload").addEventListener("click", async ()=>{
   if(!form.stem){ resBox.innerHTML='<div class="dupBox"><b>문제(발문)를 입력해 주세요.</b></div>'; return; }
 
   if(editingId){
-    await applyReplace(editingId, form);
-    resBox.innerHTML = '<div class="okBox">✓ '+editingId+' 문항이 수정되었습니다.</div>';
+    const result = await applyReplace(editingId, form);
+    resBox.innerHTML = result.versioned
+      ? '<div class="okBox">✓ '+editingId+' 문항이 수정되었습니다. (새 버전으로 기록됐어요)</div>'
+      : '<div class="okBox">✓ '+editingId+' 문항이 수정되었습니다. (내용은 기존과 동일해서 버전은 그대로예요)</div>';
     setTimeout(()=>overlaySingle.classList.remove("open"), 700);
     return;
   }
@@ -1318,14 +1398,19 @@ document.getElementById("checkAndUpload").addEventListener("click", async ()=>{
       '기존 문항 <b>'+best.q.id+'</b>('+best.q.domain+')와 내용이 매우 비슷합니다.<br>'+
       '<span style="color:#555;">"'+best.q.stem.slice(0,60)+(best.q.stem.length>60?'…':'')+'"</span>'+
       '<div class="dupBtns">'+
-      '<button class="btn primary small" id="replaceBtn">고도화 버전으로 교체 ('+best.q.id+')</button>'+
+      '<button class="btn ghost small" id="replaceSameBtn">동일 문제로 저장 ('+best.q.id+', 버전 유지)</button>'+
+      '<button class="btn primary small" id="replaceVersionBtn">새 버전으로 교체 ('+best.q.id+')</button>'+
       '<button class="btn ghost small" id="forceAddBtn">그래도 새 문제로 등록</button>'+
       '</div></div>';
-    document.getElementById("replaceBtn").onclick = async ()=>{
-      await applyReplace(best.q.id, form);
-      resBox.innerHTML = '<div class="okBox">✓ '+best.q.id+' 문항이 고도화 버전으로 교체되었습니다.</div>';
+    const doReplace = async (forceVersion) => {
+      const result = await applyReplace(best.q.id, form, forceVersion);
+      resBox.innerHTML = result.versioned
+        ? '<div class="okBox">✓ '+best.q.id+' 문항이 새 버전으로 교체되었습니다.</div>'
+        : '<div class="okBox">✓ '+best.q.id+' 문항에 동일 문제로 반영했어요. (버전 유지)</div>';
       setTimeout(()=>overlaySingle.classList.remove("open"), 800);
     };
+    document.getElementById("replaceSameBtn").onclick = ()=>doReplace(false);
+    document.getElementById("replaceVersionBtn").onclick = ()=>doReplace(true);
     document.getElementById("forceAddBtn").onclick = async ()=>{
       await addNew(form);
       resBox.innerHTML = '<div class="okBox">✓ 새 문제로 등록되었습니다.</div>';
@@ -1859,10 +1944,13 @@ document.getElementById("parseBatch").addEventListener("click", ()=>{
           : '<span style="font-size:11px;color:var(--muted);align-self:center;">배치 내 다른 문항과 중복이라 이력 추가는 개별 확인이 필요해요</span>'
         )+
         '<button class="btn small ghost" data-batchact="force" data-idx="'+i+'">그래도 등록</button><button class="btn small ghost" data-batchact="skip" data-idx="'+i+'">건너뛰기 처리됨</button></div>' : "") +
-      '<div style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--line);display:flex;gap:6px;align-items:center;">'+
-        '<span style="font-size:11px;color:var(--muted);flex-shrink:0;">기존 문항 개정판인가요?</span>'+
-        '<input type="text" data-manualidx="'+i+'" list="existingQIdList" placeholder="ID 지정 (예: COM-0005)" style="flex:1;font-size:11px;padding:4px 8px;border:1px solid var(--line);border-radius:6px;">'+
-        '<button type="button" class="btn small primary" data-manualreplacebtn="'+i+'" style="flex-shrink:0;font-size:11px;">지정 ID로 교체</button>'+
+      '<div style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--line);">'+
+        '<div style="font-size:11px;color:var(--muted);margin-bottom:6px;">기존 문항 개정판인가요?</div>'+
+        '<input type="text" data-manualidx="'+i+'" list="existingQIdList" placeholder="ID 지정 (예: COM-0005)" style="width:100%;font-size:11px;padding:4px 8px;border:1px solid var(--line);border-radius:6px;margin-bottom:6px;">'+
+        '<div style="display:flex;gap:6px;">'+
+          '<button type="button" class="btn small ghost" data-manualsamebtn="'+i+'" style="flex:1;font-size:11px;">동일 문제로 저장</button>'+
+          '<button type="button" class="btn small primary" data-manualversionbtn="'+i+'" style="flex:1;font-size:11px;">새 버전으로 교체</button>'+
+        '</div>'+
       '</div>'+
       '</div>';
   }).join("");
@@ -1900,26 +1988,32 @@ document.getElementById("parseBatch").addEventListener("click", ()=>{
     });
   });
 
-  resBox.querySelectorAll("button[data-manualreplacebtn]").forEach(btn=>{
-    btn.addEventListener("click", async ()=>{
-      const idx = parseInt(btn.getAttribute("data-manualreplacebtn"),10);
-      const input = resBox.querySelector('input[data-manualidx="'+idx+'"]');
-      const targetId = input.value.trim();
-      if(!targetId){ alert("교체할 기존 문항 ID를 입력해주세요."); return; }
-      const existing = allQuestions.find(q=>q.id===targetId);
-      if(!existing){ alert("'"+targetId+"' ID를 가진 문항을 찾을 수 없어요. 목록에서 정확한 ID를 확인해주세요."); return; }
-      if(!confirm(targetId+" 문항을 이 내용으로 교체할까요? (이전 내용은 이력에 자동 보관됩니다)")) return;
-      const item = batchParsed[idx];
-      btn.disabled = true; btn.textContent = "교체 중...";
-      await applyReplace(targetId, {
-        domain: item.domain, source: item.source, stem: item.stem, passage: item.passage,
-        choices: item.choices, answer: item.answer, difficulty: item.difficulty,
-        type: item.type||"미정", subType: item.subType||"", images: item.images||[]
-      });
-      batchParsed[idx]._skip = true; // 새로 등록하지 않고 교체로 처리됨
-      btn.closest(".batchItem").style.opacity = "0.6";
-      btn.parentElement.innerHTML = '<span style="font-size:11px;color:var(--ok);font-weight:700;">✓ '+targetId+' 문항을 이 내용으로 교체했어요</span>';
-    });
+  async function runBatchManualReplace(idx, btn, forceVersion){
+    const input = resBox.querySelector('input[data-manualidx="'+idx+'"]');
+    const targetId = input.value.trim();
+    if(!targetId){ alert("교체할 기존 문항 ID를 입력해주세요."); return; }
+    const existing = allQuestions.find(q=>q.id===targetId);
+    if(!existing){ alert("'"+targetId+"' ID를 가진 문항을 찾을 수 없어요. 목록에서 정확한 ID를 확인해주세요."); return; }
+    if(!confirm(targetId+(forceVersion ? " 문항을 새 버전으로 교체할까요?" : " 문항에 동일 문제로 반영할까요? (버전 유지)"))) return;
+    const item = batchParsed[idx];
+    const container = btn.closest("div");
+    container.querySelectorAll("button").forEach(b=>b.disabled=true);
+    const result = await applyReplace(targetId, {
+      domain: item.domain, source: item.source, stem: item.stem, passage: item.passage,
+      choices: item.choices, answer: item.answer, difficulty: item.difficulty,
+      type: item.type||"미정", subType: item.subType||"", images: item.images||[]
+    }, forceVersion);
+    batchParsed[idx]._skip = true; // 새로 등록하지 않고 교체로 처리됨
+    btn.closest(".batchItem").style.opacity = "0.6";
+    container.innerHTML = result.versioned
+      ? '<span style="font-size:11px;color:var(--ok);font-weight:700;">✓ '+targetId+' 문항을 새 버전으로 교체했어요</span>'
+      : '<span style="font-size:11px;color:var(--ok);font-weight:700;">✓ '+targetId+'에 동일 문제로 반영했어요 (버전 유지)</span>';
+  }
+  resBox.querySelectorAll("button[data-manualsamebtn]").forEach(btn=>{
+    btn.addEventListener("click", ()=>runBatchManualReplace(parseInt(btn.getAttribute("data-manualsamebtn"),10), btn, false));
+  });
+  resBox.querySelectorAll("button[data-manualversionbtn]").forEach(btn=>{
+    btn.addEventListener("click", ()=>runBatchManualReplace(parseInt(btn.getAttribute("data-manualversionbtn"),10), btn, true));
   });
 
   resBox.querySelectorAll("button[data-batchact]").forEach(btn=>{
