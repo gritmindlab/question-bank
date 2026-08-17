@@ -183,6 +183,7 @@ table.dataTable td{color:#333B4D;}
     <div class="topbtns">
       <span class="userTag" id="userEmailTag"></span>
       <button class="btn ghost small" id="seedImportBtn">초기 데이터 가져오기</button>
+      <button class="btn ghost small" id="textIssueScanBtn" style="border:1.5px solid var(--warn);color:var(--warn);background:#fff;">이상 텍스트 스캔</button>
       <button class="btn ghost" id="openBatch">일괄 붙여넣기</button>
       <button class="btn ghost" id="openExplain">해설 일괄 입력</button>
       <button class="btn primary" id="openSingle">＋ 문제 추가</button>
@@ -205,6 +206,7 @@ table.dataTable td{color:#333B4D;}
       <select id="diffFilter"><option value="">난이도 전체</option><option>하</option><option>중</option><option>상</option><option>미정</option></select>
       <select id="typeFilter"><option value="">유형 전체</option><option>모듈</option><option>피듈</option><option>피셋</option><option>직무</option><option>미정</option></select>
       <select id="imgNeedFilter"><option value="">이미지 전체</option><option value="needed">🖼 이미지 필요만</option></select>
+      <select id="reviewNeedFilter"><option value="">텍스트 상태 전체</option><option value="needed">⚠ 정제 필요만</option></select>
       <button class="btn primary small" id="searchApplyBtn">검색</button>
     </div>
     <div id="bulkBar" style="display:none;align-items:center;gap:10px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 14px;margin-bottom:10px;">
@@ -357,6 +359,14 @@ table.dataTable td{color:#333B4D;}
     <div class="formgrid2">
       <div class="formrow"><label>유형</label><select id="f_type"><option>미정</option><option>모듈</option><option>피듈</option><option>피셋</option><option>직무</option></select></div>
       <div class="formrow"><label>세부유형 (직접 입력)</label><input id="f_subType" placeholder="예: 응용수리, 자료해석, 문서이해 등"></div>
+    </div>
+    <div class="formrow" style="border:1.5px dashed var(--line);border-radius:10px;padding:12px;background:#F9FAFC;">
+      <label>이미 등록된 문항의 개정판인가요? (선택 — 지정하면 중복검사 없이 그 문항을 이 내용으로 교체해요)</label>
+      <div style="display:flex;gap:8px;">
+        <input type="text" id="f_manualReplaceId" list="existingQIdList" placeholder="ID 입력 또는 검색 (예: COM-0005)">
+        <button type="button" class="btn small primary" id="f_manualReplaceBtn" style="flex-shrink:0;">지정한 ID로 교체 등록</button>
+      </div>
+      <datalist id="existingQIdList"></datalist>
     </div>
     <div id="checkResult"></div>
     <div class="modalbtns">
