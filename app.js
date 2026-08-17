@@ -928,12 +928,19 @@ async function runDetailManualReplace(forceVersion){
   if(targetId === q.id){ alert("지금 보고 있는 문항과 같은 ID예요. 다른 ID를 지정해주세요."); return; }
   const existing = allQuestions.find(x=>x.id===targetId);
   if(!existing){ alert("'"+targetId+"' ID를 가진 문항을 찾을 수 없어요. 정확한 ID인지 확인해주세요."); return; }
-  if(!confirm(targetId+(forceVersion ? " 문항을 새 버전으로 교체할까요?" : " 문항에 동일 문제로 반영할까요? (버전 유지)")+" ("+q.id+"는 그대로 남아있어요)")) return;
+  const confirmMsg = forceVersion
+    ? targetId+" 문항을 새 버전으로 교체할까요? ("+q.id+"는 그대로 남아있어요)"
+    : targetId+" 문항에 동일 문제로 반영할까요? (버전 유지) — 같은 문제가 두 번 남지 않도록, 지금 보고 있는 "+q.id+"는 함께 삭제됩니다.";
+  if(!confirm(confirmMsg)) return;
   const form = readCurrentDetailAsForm();
   const result = await applyReplace(targetId, form, forceVersion);
-  alert(result.versioned
-    ? "✓ "+targetId+" 문항을 새 버전으로 교체했어요."
-    : "✓ "+targetId+" 문항에 동일 문제로 반영했어요. (버전 유지)");
+  if(!result.versioned){
+    await deleteQuestion(q.id); // 동일 문제로 확인된 경우, 중복으로 남지 않도록 원본은 삭제 처리
+    alert("✓ "+targetId+" 문항에 동일 문제로 반영했어요. (버전 유지, "+q.id+"는 삭제 처리됐어요)");
+    document.getElementById("viewListBtn").click();
+    return;
+  }
+  alert("✓ "+targetId+" 문항을 새 버전으로 교체했어요.");
   document.getElementById("detailManualReplaceId").value = "";
 }
 document.getElementById("detailManualReplaceSameBtn").addEventListener("click", ()=>runDetailManualReplace(false));
