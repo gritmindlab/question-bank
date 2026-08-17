@@ -350,6 +350,31 @@ document.getElementById("seedImportBtn").addEventListener("click", async ()=>{
   alert(count + "개 문항을 가져왔습니다.");
 });
 
+// PDF 추출 과정에서 흔히 남는 "이상한 흔적"을 감지한다.
+// 대표적으로 괄호 안 삽입어(예: "서(동)쪽")가 원래 자리에서 떨어져 나가면서
+// 빈 괄호 "( )"만 문장 뒤에 남는 패턴이 자주 생긴다.
+function detectTextIssue(stem, passage){
+  const combined = (stem||"") + " " + (passage||"");
+  if(/\(\s{0,2}\)/.test(combined)) return true;      // 빈 괄호 또는 괄호 안에 공백만
+  if(/[가-힣]\s[가-힣]\s쪽/.test(combined)) return true; // "서 동 쪽"처럼 글자 사이가 떨어진 패턴
+  return false;
+}
+
+document.getElementById("textIssueScanBtn").addEventListener("click", async ()=>{
+  if(!confirm("등록된 전체 문항의 텍스트를 훑어서, 빈 괄호 같은 이상 흔적이 있는 문항을 찾아 표시할까요?")) return;
+  let found = 0;
+  for(const q of allQuestions){
+    if(q.needsReview) continue; // 이미 표시된 건 건너뜀
+    if(detectTextIssue(q.stem, q.passage)){
+      await updateDoc(doc(db, QUESTIONS_COL, q.id), { needsReview: true, updatedAt: Date.now() });
+      found++;
+    }
+  }
+  alert(found>0
+    ? "✓ "+found+"개 문항에서 이상 흔적을 발견해 표시했어요. 목록에서 '⚠ 정제 필요만' 필터로 모아보실 수 있어요."
+    : "이상 흔적이 발견된 문항이 없어요.");
+});
+
 // ---------- rendering (table / detail) ----------
 function renderStats(){
   const byDomain = {};
@@ -361,6 +386,13 @@ function renderStats(){
   });
   document.getElementById("statrow").innerHTML = html;
   document.getElementById("totalCount").textContent = allQuestions.length;
+
+  const idListEl = document.getElementById("existingQIdList");
+  if(idListEl){
+    idListEl.innerHTML = allQuestions.map(q=>
+      '<option value="'+q.id+'">'+q.id+' — '+(q.stem||"").slice(0,30).replace(/"/g,'&quot;')+'</option>'
+    ).join('');
+  }
 
   const domSel = document.getElementById("domainFilter");
   const cur = domSel.value;
@@ -398,12 +430,14 @@ function getFiltered(){
   const diff = document.getElementById("diffFilter").value;
   const type = document.getElementById("typeFilter").value;
   const imgNeed = document.getElementById("imgNeedFilter").value;
+  const reviewNeed = document.getElementById("reviewNeedFilter").value;
   let list = allQuestions.slice();
   if(dom) list = list.filter(x=>x.domain===dom);
   if(src) list = list.filter(x=>x.source===src);
   if(diff) list = list.filter(x=>(x.difficulty||"미정")===diff);
   if(type) list = list.filter(x=>(x.type||"미정")===type);
   if(imgNeed==="needed") list = list.filter(x=>x.needsImage && (x.images||[]).length===0);
+  if(reviewNeed==="needed") list = list.filter(x=>x.needsReview);
   if(q) list = list.filter(x => (x.id+" "+x.stem+" "+(x.passage||"")+" "+(x.source||"")+" "+(x.type||"")+" "+(x.subType||"")).toLowerCase().includes(q));
   if(src){
     list.sort((a,b)=>{
@@ -440,7 +474,7 @@ function renderTable(){
       '<td><span class="domchip" style="color:'+col.c+';background:'+col.bg+'">'+q.domain+'</span></td>'+
       '<td>'+ (q.type||"미정") +'</td>'+
       '<td style="font-size:12px;color:var(--muted);">'+ (q.subType||"-") +'</td>'+
-      '<td class="stemcell" title="'+ (q.stem||"").replace(/"/g,'&quot;') +'">'+stemShort+'</td>'+
+      '<td class="stemcell" title="'+ (q.stem||"").replace(/"/g,'&quot;') +'">'+(q.needsReview?'<span style="color:var(--warn);font-weight:700;margin-right:4px;" title="이상 텍스트 의심">⚠</span>':'')+stemShort+'</td>'+
       '<td>'+ (q.difficulty||"미정") +'</td>'+
       '<td class="idcell">'+ (q.answer||"-") +'</td>'+
       '<td style="font-size:11.5px;color:var(--muted);">'+ (q.source||"-") +'</td>'+
@@ -1249,6 +1283,19 @@ function readForm(){
   };
 }
 
+document.getElementById("f_manualReplaceBtn").addEventListener("click", async ()=>{
+  const targetId = document.getElementById("f_manualReplaceId").value.trim();
+  const resBox = document.getElementById("checkResult"); resBox.innerHTML="";
+  if(!targetId){ resBox.innerHTML='<div class="dupBox"><b>교체할 기존 문항 ID를 입력해주세요.</b></div>'; return; }
+  const existing = allQuestions.find(q=>q.id===targetId);
+  if(!existing){ resBox.innerHTML='<div class="dupBox"><b>\''+targetId+'\' ID를 가진 문항을 찾을 수 없어요.</b> 정확한 ID인지 확인해주세요.</div>'; return; }
+  const form = readForm();
+  if(!form.stem){ resBox.innerHTML='<div class="dupBox"><b>문제(발문)를 입력해 주세요.</b></div>'; return; }
+  await applyReplace(targetId, form);
+  resBox.innerHTML = '<div class="okBox">✓ '+targetId+' 문항을 이 내용으로 교체했어요. (이전 내용은 이력에 보관됩니다)</div>';
+  setTimeout(()=>overlaySingle.classList.remove("open"), 800);
+});
+
 document.getElementById("checkAndUpload").addEventListener("click", async ()=>{
   const form = readForm();
   const resBox = document.getElementById("checkResult"); resBox.innerHTML="";
@@ -1812,6 +1859,11 @@ document.getElementById("parseBatch").addEventListener("click", ()=>{
           : '<span style="font-size:11px;color:var(--muted);align-self:center;">배치 내 다른 문항과 중복이라 이력 추가는 개별 확인이 필요해요</span>'
         )+
         '<button class="btn small ghost" data-batchact="force" data-idx="'+i+'">그래도 등록</button><button class="btn small ghost" data-batchact="skip" data-idx="'+i+'">건너뛰기 처리됨</button></div>' : "") +
+      '<div style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--line);display:flex;gap:6px;align-items:center;">'+
+        '<span style="font-size:11px;color:var(--muted);flex-shrink:0;">기존 문항 개정판인가요?</span>'+
+        '<input type="text" data-manualidx="'+i+'" list="existingQIdList" placeholder="ID 지정 (예: COM-0005)" style="flex:1;font-size:11px;padding:4px 8px;border:1px solid var(--line);border-radius:6px;">'+
+        '<button type="button" class="btn small primary" data-manualreplacebtn="'+i+'" style="flex-shrink:0;font-size:11px;">지정 ID로 교체</button>'+
+      '</div>'+
       '</div>';
   }).join("");
 
@@ -1845,6 +1897,28 @@ document.getElementById("parseBatch").addEventListener("click", ()=>{
     inp.addEventListener("change", ()=>{
       const idx = parseInt(inp.getAttribute("data-imgidx"),10);
       batchParsed[idx].images = inp.value.trim() ? [inp.value.trim()] : [];
+    });
+  });
+
+  resBox.querySelectorAll("button[data-manualreplacebtn]").forEach(btn=>{
+    btn.addEventListener("click", async ()=>{
+      const idx = parseInt(btn.getAttribute("data-manualreplacebtn"),10);
+      const input = resBox.querySelector('input[data-manualidx="'+idx+'"]');
+      const targetId = input.value.trim();
+      if(!targetId){ alert("교체할 기존 문항 ID를 입력해주세요."); return; }
+      const existing = allQuestions.find(q=>q.id===targetId);
+      if(!existing){ alert("'"+targetId+"' ID를 가진 문항을 찾을 수 없어요. 목록에서 정확한 ID를 확인해주세요."); return; }
+      if(!confirm(targetId+" 문항을 이 내용으로 교체할까요? (이전 내용은 이력에 자동 보관됩니다)")) return;
+      const item = batchParsed[idx];
+      btn.disabled = true; btn.textContent = "교체 중...";
+      await applyReplace(targetId, {
+        domain: item.domain, source: item.source, stem: item.stem, passage: item.passage,
+        choices: item.choices, answer: item.answer, difficulty: item.difficulty,
+        type: item.type||"미정", subType: item.subType||"", images: item.images||[]
+      });
+      batchParsed[idx]._skip = true; // 새로 등록하지 않고 교체로 처리됨
+      btn.closest(".batchItem").style.opacity = "0.6";
+      btn.parentElement.innerHTML = '<span style="font-size:11px;color:var(--ok);font-weight:700;">✓ '+targetId+' 문항을 이 내용으로 교체했어요</span>';
     });
   });
 
