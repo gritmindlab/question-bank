@@ -378,6 +378,20 @@ async function addUsageToExisting(existingId, usage){
   return true;
 }
 
+// "동일 문제"로 확인된 경우 쓰는 함수: 기존 문항(targetId)의 발문/지문/보기/정답 등은
+// 절대 건드리지 않고, 사용 이력만 그대로 옮겨 붙인다 (덮어쓰기 없음).
+async function mergeUsageIntoExisting(targetId, usageEntries){
+  const snap = await getDoc(doc(db, QUESTIONS_COL, targetId));
+  if(!snap.exists()) return false;
+  const prev = snap.data();
+  const usageLog = (prev.usageLog||[]).slice();
+  (usageEntries||[]).forEach(u=>{
+    if(u && (u.institution || u.when || u.grade)) usageLog.push(u);
+  });
+  await updateDoc(doc(db, QUESTIONS_COL, targetId), { usageLog, updatedAt: Date.now() });
+  return true;
+}
+
 // ---------- one-time seed import ----------
 document.getElementById("seedImportBtn").addEventListener("click", async ()=>{
   if(!confirm("초기 시드 문제(50문항)를 불러올까요? 이미 있는 ID는 건너뜁니다.")) return;
@@ -920,7 +934,8 @@ function readCurrentDetailAsForm(){
     images: q ? (q.images||[]) : []
   };
 }
-async function runDetailManualReplace(forceVersion){
+// "새 버전으로 교체" — 지정한 ID의 내용을 지금 편집중인 내용으로 덮어쓴다 (버전 올라감, 이 문항은 그대로 유지)
+async function runDetailVersionReplace(){
   const targetId = document.getElementById("detailManualReplaceId").value.trim();
   const q = currentList[detailIdx];
   if(!q) return;
@@ -928,23 +943,31 @@ async function runDetailManualReplace(forceVersion){
   if(targetId === q.id){ alert("지금 보고 있는 문항과 같은 ID예요. 다른 ID를 지정해주세요."); return; }
   const existing = allQuestions.find(x=>x.id===targetId);
   if(!existing){ alert("'"+targetId+"' ID를 가진 문항을 찾을 수 없어요. 정확한 ID인지 확인해주세요."); return; }
-  const confirmMsg = forceVersion
-    ? targetId+" 문항을 새 버전으로 교체할까요? ("+q.id+"는 그대로 남아있어요)"
-    : targetId+" 문항에 동일 문제로 반영할까요? (버전 유지) — 같은 문제가 두 번 남지 않도록, 지금 보고 있는 "+q.id+"는 함께 삭제됩니다.";
-  if(!confirm(confirmMsg)) return;
+  if(!confirm(targetId+" 문항을 새 버전으로 교체할까요? ("+q.id+"는 그대로 남아있어요)")) return;
   const form = readCurrentDetailAsForm();
-  const result = await applyReplace(targetId, form, forceVersion);
-  if(!result.versioned){
-    await deleteQuestion(q.id); // 동일 문제로 확인된 경우, 중복으로 남지 않도록 원본은 삭제 처리
-    alert("✓ "+targetId+" 문항에 동일 문제로 반영했어요. (버전 유지, "+q.id+"는 삭제 처리됐어요)");
-    document.getElementById("viewListBtn").click();
-    return;
-  }
+  await applyReplace(targetId, form, true);
   alert("✓ "+targetId+" 문항을 새 버전으로 교체했어요.");
   document.getElementById("detailManualReplaceId").value = "";
 }
-document.getElementById("detailManualReplaceSameBtn").addEventListener("click", ()=>runDetailManualReplace(false));
-document.getElementById("detailManualReplaceVersionBtn").addEventListener("click", ()=>runDetailManualReplace(true));
+
+// "동일 문제로 저장" — 지정한 ID(targetId)의 내용은 절대 건드리지 않고, 지금 보고 있는 문항(q)의
+// 사용 이력만 targetId에 옮겨 붙인 뒤, 중복인 이 문항(q)은 삭제한다. (덮어쓰기 없음)
+async function runDetailSameQuestionMerge(){
+  const targetId = document.getElementById("detailManualReplaceId").value.trim();
+  const q = currentList[detailIdx];
+  if(!q) return;
+  if(!targetId){ alert("합칠 기존 문항 ID를 입력해주세요."); return; }
+  if(targetId === q.id){ alert("지금 보고 있는 문항과 같은 ID예요. 다른 ID를 지정해주세요."); return; }
+  const existing = allQuestions.find(x=>x.id===targetId);
+  if(!existing){ alert("'"+targetId+"' ID를 가진 문항을 찾을 수 없어요. 정확한 ID인지 확인해주세요."); return; }
+  if(!confirm(targetId+" 문항은 내용 그대로 두고, 지금 보고 있는 "+q.id+"의 사용 이력만 옮겨 붙인 뒤 "+q.id+"는 삭제할까요?")) return;
+  await mergeUsageIntoExisting(targetId, q.usageLog||[]);
+  await deleteQuestion(q.id);
+  alert("✓ "+targetId+" 문항에 사용 이력을 합쳤어요. ("+targetId+"의 내용은 그대로예요, "+q.id+"는 삭제 처리됐어요)");
+  document.getElementById("viewListBtn").click();
+}
+document.getElementById("detailManualReplaceSameBtn").addEventListener("click", runDetailSameQuestionMerge);
+document.getElementById("detailManualReplaceVersionBtn").addEventListener("click", runDetailVersionReplace);
 
 document.getElementById("reassignIdBtn").addEventListener("click", async ()=>{
   const q = currentList[detailIdx];
@@ -1364,7 +1387,8 @@ function readForm(){
   };
 }
 
-async function runManualReplace(forceVersion){
+// "새 버전으로 교체" — 지정한 ID의 내용을 지금 입력한 내용으로 덮어쓴다 (버전 올라감)
+async function runManualVersionReplace(){
   const targetId = document.getElementById("f_manualReplaceId").value.trim();
   const resBox = document.getElementById("checkResult"); resBox.innerHTML="";
   if(!targetId){ resBox.innerHTML='<div class="dupBox"><b>교체할 기존 문항 ID를 입력해주세요.</b></div>'; return; }
@@ -1372,14 +1396,24 @@ async function runManualReplace(forceVersion){
   if(!existing){ resBox.innerHTML='<div class="dupBox"><b>\''+targetId+'\' ID를 가진 문항을 찾을 수 없어요.</b> 정확한 ID인지 확인해주세요.</div>'; return; }
   const form = readForm();
   if(!form.stem){ resBox.innerHTML='<div class="dupBox"><b>문제(발문)를 입력해 주세요.</b></div>'; return; }
-  const result = await applyReplace(targetId, form, forceVersion);
-  resBox.innerHTML = result.versioned
-    ? '<div class="okBox">✓ '+targetId+' 문항을 새 버전으로 교체했어요. (이전 내용은 이력에 보관됩니다)</div>'
-    : '<div class="okBox">✓ '+targetId+' 문항에 동일 문제로 반영했어요. (버전은 그대로예요)</div>';
+  await applyReplace(targetId, form, true);
+  resBox.innerHTML = '<div class="okBox">✓ '+targetId+' 문항을 새 버전으로 교체했어요. (이전 내용은 이력에 보관됩니다)</div>';
   setTimeout(()=>overlaySingle.classList.remove("open"), 800);
 }
-document.getElementById("f_manualReplaceSameBtn").addEventListener("click", ()=>runManualReplace(false));
-document.getElementById("f_manualReplaceVersionBtn").addEventListener("click", ()=>runManualReplace(true));
+// "동일 문제로 저장" — 지정한 ID의 내용은 그대로 두고, 지금 입력한 사용 이력만 그 문항에 추가한다 (덮어쓰기 없음)
+async function runManualSameQuestionMerge(){
+  const targetId = document.getElementById("f_manualReplaceId").value.trim();
+  const resBox = document.getElementById("checkResult"); resBox.innerHTML="";
+  if(!targetId){ resBox.innerHTML='<div class="dupBox"><b>합칠 기존 문항 ID를 입력해주세요.</b></div>'; return; }
+  const existing = allQuestions.find(q=>q.id===targetId);
+  if(!existing){ resBox.innerHTML='<div class="dupBox"><b>\''+targetId+'\' ID를 가진 문항을 찾을 수 없어요.</b> 정확한 ID인지 확인해주세요.</div>'; return; }
+  const form = readForm();
+  await mergeUsageIntoExisting(targetId, form.usageLog||[]);
+  resBox.innerHTML = '<div class="okBox">✓ '+targetId+' 문항은 내용 그대로 두고, 입력하신 사용 이력만 추가했어요.</div>';
+  setTimeout(()=>overlaySingle.classList.remove("open"), 800);
+}
+document.getElementById("f_manualReplaceSameBtn").addEventListener("click", runManualSameQuestionMerge);
+document.getElementById("f_manualReplaceVersionBtn").addEventListener("click", runManualVersionReplace);
 
 document.getElementById("checkAndUpload").addEventListener("click", async ()=>{
   const form = readForm();
@@ -1409,15 +1443,16 @@ document.getElementById("checkAndUpload").addEventListener("click", async ()=>{
       '<button class="btn primary small" id="replaceVersionBtn">새 버전으로 교체 ('+best.q.id+')</button>'+
       '<button class="btn ghost small" id="forceAddBtn">그래도 새 문제로 등록</button>'+
       '</div></div>';
-    const doReplace = async (forceVersion) => {
-      const result = await applyReplace(best.q.id, form, forceVersion);
-      resBox.innerHTML = result.versioned
-        ? '<div class="okBox">✓ '+best.q.id+' 문항이 새 버전으로 교체되었습니다.</div>'
-        : '<div class="okBox">✓ '+best.q.id+' 문항에 동일 문제로 반영했어요. (버전 유지)</div>';
+    document.getElementById("replaceSameBtn").onclick = async ()=>{
+      await mergeUsageIntoExisting(best.q.id, form.usageLog||[]);
+      resBox.innerHTML = '<div class="okBox">✓ '+best.q.id+' 문항은 내용 그대로 두고, 입력하신 사용 이력만 추가했어요.</div>';
       setTimeout(()=>overlaySingle.classList.remove("open"), 800);
     };
-    document.getElementById("replaceSameBtn").onclick = ()=>doReplace(false);
-    document.getElementById("replaceVersionBtn").onclick = ()=>doReplace(true);
+    document.getElementById("replaceVersionBtn").onclick = async ()=>{
+      await applyReplace(best.q.id, form, true);
+      resBox.innerHTML = '<div class="okBox">✓ '+best.q.id+' 문항이 새 버전으로 교체되었습니다.</div>';
+      setTimeout(()=>overlaySingle.classList.remove("open"), 800);
+    };
     document.getElementById("forceAddBtn").onclick = async ()=>{
       await addNew(form);
       resBox.innerHTML = '<div class="okBox">✓ 새 문제로 등록되었습니다.</div>';
@@ -1995,32 +2030,52 @@ document.getElementById("parseBatch").addEventListener("click", ()=>{
     });
   });
 
-  async function runBatchManualReplace(idx, btn, forceVersion){
+  async function runBatchVersionReplace(idx, btn){
     const input = resBox.querySelector('input[data-manualidx="'+idx+'"]');
     const targetId = input.value.trim();
     if(!targetId){ alert("교체할 기존 문항 ID를 입력해주세요."); return; }
     const existing = allQuestions.find(q=>q.id===targetId);
     if(!existing){ alert("'"+targetId+"' ID를 가진 문항을 찾을 수 없어요. 목록에서 정확한 ID를 확인해주세요."); return; }
-    if(!confirm(targetId+(forceVersion ? " 문항을 새 버전으로 교체할까요?" : " 문항에 동일 문제로 반영할까요? (버전 유지)"))) return;
+    if(!confirm(targetId+" 문항을 새 버전으로 교체할까요?")) return;
     const item = batchParsed[idx];
     const container = btn.closest("div");
     container.querySelectorAll("button").forEach(b=>b.disabled=true);
-    const result = await applyReplace(targetId, {
+    await applyReplace(targetId, {
       domain: item.domain, source: item.source, stem: item.stem, passage: item.passage,
       choices: item.choices, answer: item.answer, difficulty: item.difficulty,
       type: item.type||"미정", subType: item.subType||"", images: item.images||[]
-    }, forceVersion);
+    }, true);
     batchParsed[idx]._skip = true; // 새로 등록하지 않고 교체로 처리됨
     btn.closest(".batchItem").style.opacity = "0.6";
-    container.innerHTML = result.versioned
-      ? '<span style="font-size:11px;color:var(--ok);font-weight:700;">✓ '+targetId+' 문항을 새 버전으로 교체했어요</span>'
-      : '<span style="font-size:11px;color:var(--ok);font-weight:700;">✓ '+targetId+'에 동일 문제로 반영했어요 (버전 유지)</span>';
+    container.innerHTML = '<span style="font-size:11px;color:var(--ok);font-weight:700;">✓ '+targetId+' 문항을 새 버전으로 교체했어요</span>';
+  }
+  // "동일 문제로 저장" — targetId의 내용은 그대로 두고, 위쪽 "사용 이력" 칸에 입력한 이력만 그 문항에 추가한다
+  async function runBatchSameQuestionMerge(idx, btn){
+    const input = resBox.querySelector('input[data-manualidx="'+idx+'"]');
+    const targetId = input.value.trim();
+    if(!targetId){ alert("합칠 기존 문항 ID를 입력해주세요."); return; }
+    const existing = allQuestions.find(q=>q.id===targetId);
+    if(!existing){ alert("'"+targetId+"' ID를 가진 문항을 찾을 수 없어요. 목록에서 정확한 ID를 확인해주세요."); return; }
+    const uInst = document.getElementById("batch_usageInst").value.trim();
+    const uWhen = document.getElementById("batch_usageWhen").value.trim();
+    const uGrade = document.getElementById("batch_usageGrade").value.trim();
+    if(!uInst && !uWhen && !uGrade){
+      alert("추가할 사용 이력(기관/시기/학년)을 위쪽 '사용 이력' 칸에 먼저 입력해주세요.");
+      return;
+    }
+    if(!confirm(targetId+" 문항은 내용 그대로 두고, 입력하신 사용 이력만 추가할까요?")) return;
+    const container = btn.closest("div");
+    container.querySelectorAll("button").forEach(b=>b.disabled=true);
+    await mergeUsageIntoExisting(targetId, [{institution:uInst, when:uWhen, grade:uGrade}]);
+    batchParsed[idx]._skip = true;
+    btn.closest(".batchItem").style.opacity = "0.6";
+    container.innerHTML = '<span style="font-size:11px;color:var(--ok);font-weight:700;">✓ '+targetId+'은 내용 그대로, 사용 이력만 추가했어요</span>';
   }
   resBox.querySelectorAll("button[data-manualsamebtn]").forEach(btn=>{
-    btn.addEventListener("click", ()=>runBatchManualReplace(parseInt(btn.getAttribute("data-manualsamebtn"),10), btn, false));
+    btn.addEventListener("click", ()=>runBatchSameQuestionMerge(parseInt(btn.getAttribute("data-manualsamebtn"),10), btn));
   });
   resBox.querySelectorAll("button[data-manualversionbtn]").forEach(btn=>{
-    btn.addEventListener("click", ()=>runBatchManualReplace(parseInt(btn.getAttribute("data-manualversionbtn"),10), btn, true));
+    btn.addEventListener("click", ()=>runBatchVersionReplace(parseInt(btn.getAttribute("data-manualversionbtn"),10), btn));
   });
 
   resBox.querySelectorAll("button[data-batchact]").forEach(btn=>{
